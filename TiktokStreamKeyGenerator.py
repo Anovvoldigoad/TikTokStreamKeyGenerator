@@ -4597,6 +4597,13 @@ class StreamKeyGeneratorWindow(AccentWindow):
             "Images (*.png *.jpg *.jpeg);;All files (*.*)",
         )
         if file_path:
+            try:
+                if is_android_runtime():
+                    from Libs.android_file_import import import_selected_file
+                    file_path = import_selected_file(file_path, "thumbnail")
+            except (OSError, ValueError, RuntimeError) as exc:
+                self.show_error(f"Could not import thumbnail: {exc}")
+                return
             self.thumbnail_edit.setText(file_path)
 
     def copy_to_clipboard(self, content, button=None):
@@ -5633,6 +5640,9 @@ class StreamKeyGeneratorWindow(AccentWindow):
             return
 
         try:
+            if is_android_runtime():
+                from Libs.android_file_import import import_selected_file
+                file_path = import_selected_file(file_path, "cookies")
             self.load_cookie_entries_from_file(file_path)
         except Exception as exc:
             self.show_error(f"Invalid cookies JSON: {exc}")

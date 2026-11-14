@@ -49,5 +49,28 @@ class AndroidFfmpegPathTests(unittest.TestCase):
                     self.assertEqual(find_ffmpeg(), candidate)
 
 
+
+class AndroidContentImportTests(unittest.TestCase):
+    def test_image_format_recognition(self):
+        from Libs.android_file_import import _thumbnail_extension
+        self.assertEqual(_thumbnail_extension(bytes.fromhex("89504e470d0a1a0a")), ".png")
+        self.assertEqual(_thumbnail_extension(bytes.fromhex("ffd8ffe0")), ".jpg")
+        with self.assertRaises(ValueError):
+            _thumbnail_extension(b"not-an-image")
+
+    def test_stream_copy_size_and_empty_guards(self):
+        import io
+        import tempfile
+        from pathlib import Path
+        from Libs.android_file_import import _copy_limited_stream
+        with tempfile.TemporaryDirectory() as dirname:
+            dst = str(Path(dirname) / "import.bin")
+            self.assertEqual(_copy_limited_stream(io.BytesIO(b"hello"), dst, 5), b"hello")
+            self.assertEqual(Path(dst).read_bytes(), b"hello")
+            with self.assertRaisesRegex(ValueError, "exceeds"):
+                _copy_limited_stream(io.BytesIO(b"toolarge"), dst, 4)
+            with self.assertRaisesRegex(ValueError, "empty"):
+                _copy_limited_stream(io.BytesIO(b""), dst, 10)
+
 if __name__ == "__main__":
     unittest.main()

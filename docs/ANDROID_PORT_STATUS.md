@@ -23,8 +23,9 @@ remains the behavioral reference. **No functional Android APK is claimed yet.**
 2. The desktop child-Python relay now has an Android-managed thread path using
    the same SEI signer/injector. Offline stop tests are present; live FFmpeg
    subprocess lifecycle and simultaneous dual streams need device validation.
-3. Implement Android Storage Access Framework file import for cookies and
-   thumbnail selections; verify persistence and file URI permissions.
+3. Android cookie/thumbnail selectors now use Qt's SAF content-URI-aware QFile
+   then copy into private storage. Offline size/format tests PASS only if CI
+   confirms; test real on-device picker URI access and persistence.
 4. Check the Qt Fluent interface in portrait and landscape with the soft
    keyboard, font scaling and system back navigation.
 5. Keep heartbeats, proxy and chat running through Android background/Doze
