@@ -45,7 +45,7 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358'
           sudo apt-get update
-          sudo apt-get install -y zip unzip libffi-dev libssl-dev autoconf automake libtool pkg-config libdouble-conversion3 libgl1 libegl1 libopengl0 libxkbcommon0 libxcb-cursor0 libdbus-1-3
+          sudo apt-get install -y zip unzip libffi-dev libssl-dev libltdl-dev autoconf automake libtool pkg-config libdouble-conversion3 libgl1 libegl1 libopengl0 libxkbcommon0 libxcb-cursor0 libdbus-1-3
           # Buildozer 1.6 still probes the old SDK tools/bin path.
           # Use a forwarding wrapper; do not copy the actual command-line tools.
           SDKMANAGER="$(command -v sdkmanager)"
