@@ -67,8 +67,11 @@ jobs:
           test -n "$PYSIDE_WHEEL" && test -n "$SHIBOKEN_WHEEL"
           python - <<'PY'
           from pathlib import Path
-          from PySide6.scripts.deploy_lib.android.android_helper import get_wheel_android_arch
-          from PySide6.scripts.deploy_lib.android.android_utilities import SUPPORTED_ANDROID_PLATFORMS
+          import sys
+          import PySide6
+          sys.path.insert(0, str(Path(PySide6.__file__).parent / "scripts"))
+          from deploy_lib.android.android_helper import get_wheel_android_arch
+          from deploy_lib.android.android_utilities import SUPPORTED_ANDROID_PLATFORMS
           print("Qt supported Android architectures:", SUPPORTED_ANDROID_PLATFORMS)
           for wheel in sorted(Path("android-wheels").rglob("*.whl")):
               print("WHEEL:", wheel.name, "ARCH:", get_wheel_android_arch(wheel))
