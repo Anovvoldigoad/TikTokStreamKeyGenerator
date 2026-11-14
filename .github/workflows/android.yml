@@ -49,7 +49,7 @@ jobs:
       - name: Prepare supported Qt for Python Android wheels
         run: |
           python -m pip install --upgrade pip
-          python -m pip install 'PySide6==6.12.0' qtpip
+          python -m pip install 'PySide6==6.12.0'
           python -m pip install -r requirements-android.txt
           python -m pip install -r "$(python - <<'PY'
           import pathlib, PySide6
@@ -57,14 +57,22 @@ jobs:
           PY
           )"
           mkdir -p android-wheels
-          cd android-wheels
-          qtpip download PySide6 --android --arch aarch64
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://download.qt.io/official_releases/QtForPython/pyside6/pyside6-6.12.0-6.12.0-cp310-abi3-android_aarch64.whl' \
+            --output 'android-wheels/pyside6-6.12.0-6.12.0-cp310-abi3-android_aarch64.whl'
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://download.qt.io/official_releases/QtForPython/shiboken6/shiboken6-6.12.0-6.12.0-cp310-abi3-android_aarch64.whl' \
+            --output 'android-wheels/shiboken6-6.12.0-6.12.0-cp310-abi3-android_aarch64.whl'
+          unzip -tq android-wheels/*.whl
       - name: Build arm64 Qt Android package (bootstrap verification only)
         run: |
           set -euo pipefail
           PYSIDE_WHEEL="$(find android-wheels -type f -iname 'pyside6-*-android_aarch64.whl' | head -1)"
           SHIBOKEN_WHEEL="$(find android-wheels -type f -iname 'shiboken6-*-android_aarch64.whl' | head -1)"
-          test -n "$PYSIDE_WHEEL" && test -n "$SHIBOKEN_WHEEL"
+          if [[ -z "$PYSIDE_WHEEL" || -z "$SHIBOKEN_WHEEL" ]]; then
+            echo 'Required official Qt Android wheels were not downloaded' >&2
+            exit 1
+          fi
           python - <<'PY'
           from pathlib import Path
           import sys
