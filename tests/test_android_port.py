@@ -46,8 +46,9 @@ class ProxyLifecycleTests(unittest.TestCase):
         from Libs import ffmpeg_sei_proxy as proxy
 
         stop = threading.Event()
-        args = argparse.Namespace(device_type="pc", uid="", device_id="", room_id="",
-                                  aid="8311", width=1920, height=1080, fps=60)
+        args = argparse.Namespace(device_type="pc", input_flv="listen", uid="",
+                                  device_id="", room_id="", aid="8311",
+                                  width=1920, height=1080, fps=60)
         class FakeSigner:
             def __init__(self, **kwargs):
                 pass
