@@ -35,10 +35,10 @@ jobs:
           import pathlib, re
           header = pathlib.Path("elf-header.txt").read_text()
           program = pathlib.Path("elf-program-headers.txt").read_text()
-          if not re.search(r"Machine:\\s*AArch64", header):
+          if not re.search(r"Machine:\s*AArch64", header):
               raise SystemExit("Not an AArch64 ELF")
           load_lines = [line for line in program.splitlines()
-                        if re.match(r"^\\s*LOAD\\s", line)]
+                        if re.match(r"^\s*LOAD\s", line)]
           if not load_lines:
               raise SystemExit("ELF contains no LOAD segments")
           alignments = [int(line.split()[-1], 16) for line in load_lines]
