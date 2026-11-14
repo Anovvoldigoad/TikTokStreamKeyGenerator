@@ -29,5 +29,40 @@ class SignerFallbackTests(unittest.TestCase):
         self.assertTrue(hasattr(requests, "exceptions"))
 
 
+class ProxyLifecycleTests(unittest.TestCase):
+    def test_parser_uses_same_arguments_as_desktop(self):
+        from Libs.ffmpeg_sei_proxy import parse_proxy_args
+        args = parse_proxy_args([
+            "--ffmpeg", "/bin/ffmpeg", "--listen-url", "rtmp://127.0.0.1:19350/live/obs",
+            "--output-url", "rtmps://example.invalid/secret", "--room-id", "123",
+        ])
+        self.assertEqual(args.room_id, "123")
+        self.assertEqual(args.device_type, "pc")
+
+    def test_stop_ends_relay_without_reopening_listener(self):
+        import io
+        import argparse
+        import threading
+        from Libs import ffmpeg_sei_proxy as proxy
+
+        stop = threading.Event()
+        args = argparse.Namespace(device_type="pc", uid="", device_id="", room_id="",
+                                  aid="8311", width=1920, height=1080, fps=60)
+        class FakeSigner:
+            def __init__(self, **kwargs):
+                pass
+            def start_initial_prefetch(self):
+                pass
+        def one_session(*args, **kwargs):
+            stop.set()
+            return 0
+        with mock.patch.object(proxy, "LocalSeiSigner", FakeSigner), \
+             mock.patch.object(proxy, "_relay_once", side_effect=one_session):
+            self.assertEqual(
+                proxy._run_proxy_with_log(args, io.StringIO(), stop_event=stop),
+                0,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,9 +16,9 @@ remains the behavioral reference. **No functional Android APK is claimed yet.**
 ## Known blockers — all required before a parity release
 1. Package and execute 16-KiB-compatible Android arm64 FFmpeg, including
    RTMP listen and push, FLV, H.264/HEVC bitstream filters, and network TLS.
-2. Replace the desktop child-Python `--sei-proxy` launch with a managed
-   Android-compatible proxy runtime, retaining frame signing, restart,
-   cleanup, typed errors and both simultaneous dual-layout streams.
+2. The desktop child-Python relay now has an Android-managed thread path using
+   the same SEI signer/injector. Offline stop tests are present; live FFmpeg
+   subprocess lifecycle and simultaneous dual streams need device validation.
 3. Implement Android Storage Access Framework file import for cookies and
    thumbnail selections; verify persistence and file URI permissions.
 4. Check the Qt Fluent interface in portrait and landscape with the soft

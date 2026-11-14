@@ -3279,7 +3279,7 @@ class StreamKeyGeneratorWindow(AccentWindow):
         self._proxy_cleanup_threads = []
         self.device_id = ""
         self.install_id = ""
-        self.device_type = 'pc'
+        self.device_type = 'mobile' if is_android_runtime() else 'pc'
         self.devices = {'pc': {}, 'mobile': {'device_id': '', 'install_id': ''}}
         self._config_extra = {}
         self.current_room_id = ""
@@ -5842,6 +5842,10 @@ class StreamKeyGeneratorWindow(AccentWindow):
             log_path,
         ]
 
+        if is_android_runtime():
+            # Android has no launchable child CPython executable. Run the same
+            # signed relay algorithm in a managed worker thread instead.
+            return ["--sei-proxy", *proxy_args]
         if _is_packaged_app():
             return [_app_executable_path(), "--sei-proxy", *proxy_args]
 
@@ -5901,13 +5905,24 @@ class StreamKeyGeneratorWindow(AccentWindow):
         rapidapi_key = self.get_rapidapi_key()
         if rapidapi_key:
             child_env["RAPIDAPI_KEY"] = rapidapi_key
-        setattr(self, process_attribute, (yield Work(subprocess.Popen, command,
-            cwd=_runtime_base_dir(),
-            stdin=subprocess.DEVNULL,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            creationflags=creationflags,
-            env=child_env, label='Preparing local FFmpeg proxy signatures…')))
+        if is_android_runtime():
+            if not command or command[0] != "--sei-proxy":
+                raise RuntimeError("Invalid Android signed proxy command.")
+            from Libs.android_proxy import AndroidProxyProcess
+            # Signer settings are read from Android-private config.json.
+            # Do not mutate os.environ for one thread while a second canvas
+            # signs frames concurrently.
+            setattr(self, process_attribute, (yield Work(
+                AndroidProxyProcess, command[1:],
+                label='Preparing local FFmpeg proxy signatures…')))
+        else:
+            setattr(self, process_attribute, (yield Work(subprocess.Popen, command,
+                cwd=_runtime_base_dir(),
+                stdin=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                creationflags=creationflags,
+                env=child_env, label='Preparing local FFmpeg proxy signatures…')))
 
         (yield Work(time.sleep, 0.35, label='Preparing local FFmpeg proxy signatures…'))
         process = getattr(self, process_attribute)
@@ -6683,6 +6698,12 @@ class StreamKeyGeneratorWindow(AccentWindow):
             with open(CONFIG_PATH, "r", encoding="utf-8") as file:
                 data = json.load(file)
         except FileNotFoundError:
+            if is_android_runtime():
+                self.device_type = 'mobile'
+                self.device_type_combo.blockSignals(True)
+                self.device_type_combo.setCurrentIndex(1)
+                self.device_type_combo.blockSignals(False)
+                self.update_device_mode_controls()
             self.device_id = ""
             self.install_id = ""
             self.cookie_file_path = _normalize_configured_path(DEFAULT_COOKIES_PATH)
