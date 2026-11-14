@@ -39,8 +39,13 @@ def configure(original):
     # Must be an actual active option, not a commented example.
     if any(line.strip().startswith("android.add_libs_arm64_v8a =") for line in output):
         raise ValueError("Existing Android native library configuration must be reviewed")
-    output.append("\n# Pinned 16 KiB-compatible ARM64 FFmpeg executable.\n")
-    output.append(f"android.add_libs_arm64_v8a = {FFMPEG_LIB}\n")
+    # The native-library option belongs to [app], not [buildozer].
+    next_section = next(
+        (i for i, line in enumerate(output) if line.strip().startswith("[")
+         and line.strip() != "[app]"), len(output)
+    )
+    output.insert(next_section, f"android.add_libs_arm64_v8a = {FFMPEG_LIB}\n")
+    output.insert(next_section, "# Pinned 16 KiB-compatible ARM64 FFmpeg executable.\n")
     return "".join(output)
 
 

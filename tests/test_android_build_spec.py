@@ -11,6 +11,8 @@ class AndroidBuildSpecTests(unittest.TestCase):
             "p4a.bootstrap = qt\n"
             "android.archs = aarch64\n"
             "android.permissions = INTERNET\n"
+            "[buildozer]\n"
+            "log_level = 2\n"
         )
         target = configure(src)
         self.assertIn("requirements = " + REQUIREMENTS, target)
@@ -18,6 +20,7 @@ class AndroidBuildSpecTests(unittest.TestCase):
         self.assertIn("source.include_exts = py,png,jpg,kv,atlas,qml,js,json,svg,ttf,otf,ico,webp,pem", target)
         self.assertIn("p4a.bootstrap = qt", target)
         self.assertIn("android.permissions = INTERNET", target)
+        self.assertLess(target.index("android.add_libs_arm64_v8a"), target.index("[buildozer]"))
 
     def test_rejects_missing_required_qt_settings(self):
         with self.assertRaisesRegex(ValueError, "missing expected keys"):
