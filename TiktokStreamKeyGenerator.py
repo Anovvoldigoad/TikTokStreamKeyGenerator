@@ -5642,7 +5642,9 @@ class StreamKeyGeneratorWindow(AccentWindow):
         try:
             if is_android_runtime():
                 from Libs.android_file_import import import_selected_file
-                file_path = import_selected_file(file_path, "cookies")
+                file_path = import_selected_file(
+                    file_path, "cookies", validator=self.load_cookie_entries_from_file
+                )
             self.load_cookie_entries_from_file(file_path)
         except Exception as exc:
             self.show_error(f"Invalid cookies JSON: {exc}")

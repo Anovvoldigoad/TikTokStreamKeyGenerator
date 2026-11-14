@@ -40,7 +40,7 @@ def _copy_limited_stream(source, target, byte_limit):
     return first_chunk
 
 
-def import_selected_file(file_path, purpose):
+def import_selected_file(file_path, purpose, validator=None):
     """Return durable private pathname; `file_path` comes from user picker."""
     if purpose not in ("cookies", "thumbnail"):
         raise ValueError("Unsupported file import purpose")
@@ -57,6 +57,10 @@ def import_selected_file(file_path, purpose):
         maximum = 16 * 1024 * 1024 if purpose == "cookies" else 20 * 1024 * 1024
         first_chunk = _copy_limited_stream(source, temporary_path, maximum)
         if purpose == "cookies":
+            # Validate the temporary file before replacing a previously valid
+            # cookie export. The caller supplies its existing strict parser.
+            if validator is not None:
+                validator(temporary_path)
             dest = directory / "selected-cookies.json"
         else:
             ext = _thumbnail_extension(first_chunk)
