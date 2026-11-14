@@ -50,7 +50,7 @@ jobs:
           # Use a forwarding wrapper; do not copy the actual command-line tools.
           SDKMANAGER="$(command -v sdkmanager)"
           mkdir -p "$ANDROID_HOME/tools/bin"
-          printf '#!/bin/sh\\nexec "%s" "$@"\\n' "$SDKMANAGER" > "$ANDROID_HOME/tools/bin/sdkmanager"
+          printf '#!/bin/sh\nexec "%s" "$@"\n' "$SDKMANAGER" > "$ANDROID_HOME/tools/bin/sdkmanager"
           chmod +x "$ANDROID_HOME/tools/bin/sdkmanager"
       - name: Prepare supported Qt for Python Android wheels
         run: |
