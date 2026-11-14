@@ -65,5 +65,35 @@ class ProxyLifecycleTests(unittest.TestCase):
             )
 
 
+    def test_proxy_does_not_retain_reaped_ffmpeg_children(self):
+        import threading
+        from Libs.android_proxy import AndroidProxyProcess
+
+        class FakeProcess:
+            def __init__(self, exit_code):
+                self.exit_code = exit_code
+                self.terminated = False
+
+            def poll(self):
+                return self.exit_code
+
+            def terminate(self):
+                self.terminated = True
+
+        worker = AndroidProxyProcess.__new__(AndroidProxyProcess)
+        worker._lock = threading.Lock()
+        worker._stop = threading.Event()
+        worker._processes = []
+        for _ in range(100):
+            worker._track(FakeProcess(exit_code=0))
+        self.assertEqual(len(worker._processes), 1)
+        running = FakeProcess(exit_code=None)
+        worker._track(running)
+        worker._stop.set()
+        next_process = FakeProcess(exit_code=None)
+        worker._track(next_process)
+        self.assertTrue(next_process.terminated)
+        self.assertFalse(running.terminated)
+
 if __name__ == "__main__":
     unittest.main()

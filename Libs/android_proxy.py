@@ -27,6 +27,11 @@ class AndroidProxyProcess:
 
     def _track(self, process):
         with self._lock:
+            # Reconnects create fresh listen/push subprocesses indefinitely.
+            # Drop completed Popen objects so the proxy doesn't leak them.
+            self._processes = [
+                child for child in self._processes if child.poll() is None
+            ]
             self._processes.append(process)
             stopped = self._stop.is_set()
         if stopped:
