@@ -60,11 +60,14 @@ LOG_PATH = _logs_dir() / "signature_api.log"
 
 
 def _read_config() -> dict:
-    for path in (
+    # Android packages are read-only; saved keys live in private app storage.
+    from Libs.app_paths import user_data_dir
+    for path in dict.fromkeys((
+        Path(user_data_dir()) / "config.json",
         APP_ROOT / "config.json",
         APP_ROOT.parent / "config.json",
         Path.cwd() / "config.json",
-    ):
+    )):
         try:
             if path.exists():
                 with path.open("r", encoding="utf-8") as fh:
