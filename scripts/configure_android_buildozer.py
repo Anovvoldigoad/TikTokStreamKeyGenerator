@@ -40,7 +40,7 @@ def configure(original):
                 line = "source.include_exts = " + ",".join(exts) + "\n"
                 replaced.add(key)
         output.append(line)
-    if replaced != {"requirements", "source.include_exts"}:
+    if not {"requirements", "source.include_exts"}.issubset(replaced):
         raise ValueError("Qt-generated Buildozer config is missing expected keys")
     # Must be an actual active option, not a commented example.
     if any(line.strip().startswith("android.add_libs_arm64_v8a =") for line in output):
