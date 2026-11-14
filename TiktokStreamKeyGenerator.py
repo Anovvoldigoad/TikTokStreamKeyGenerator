@@ -7075,8 +7075,9 @@ class StreamKeyGeneratorWindow(AccentWindow):
         # without a working relay leaves a LIVE running but unusable.
         if is_android_runtime():
             try:
-                _bundled_ffmpeg_path()
-            except (FileNotFoundError, PermissionError) as exc:
+                from Libs.android_ffmpeg import validate_ffmpeg_for_live
+                validate_ffmpeg_for_live(_bundled_ffmpeg_path())
+            except (OSError, RuntimeError) as exc:
                 self.show_error(str(exc))
                 return
         self.save_config(show_message=False)

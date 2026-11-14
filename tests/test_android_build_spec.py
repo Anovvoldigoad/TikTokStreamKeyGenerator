@@ -81,5 +81,36 @@ class AndroidContentImportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "empty"):
                 _copy_limited_stream(io.BytesIO(b""), dst, 10)
 
+
+class AndroidFfmpegRuntimeTests(unittest.TestCase):
+    def test_preflight_checks_relay_features(self):
+        from unittest import mock
+        from Libs.android_ffmpeg import validate_ffmpeg_for_live
+        protocol_text = "Supported protocols:\\nInput:\\nrtmp\\nrtmps\\nOutput:\\nrtmp\\nrtmps\\n"
+        class Result:
+            def __init__(self, stdout):
+                self.stdout = stdout
+                self.stderr = ""
+        outputs = [Result(protocol_text), Result("filter_units\\n"), Result(" DE flv  FLV \\n")]
+        with mock.patch("subprocess.run", side_effect=outputs) as runner:
+            self.assertTrue(validate_ffmpeg_for_live("/android/ffmpeg"))
+            self.assertEqual(runner.call_count, 3)
+
+    def test_preflight_rejects_absent_rtmps(self):
+        from unittest import mock
+        from Libs.android_ffmpeg import validate_ffmpeg_for_live
+        with mock.patch("subprocess.run") as runner:
+            runner.return_value.stdout = "Input:\\nrtmp\\nOutput:\\nrtmp\\n"
+            runner.return_value.stderr = ""
+            with self.assertRaisesRegex(RuntimeError, "rtmps"):
+                validate_ffmpeg_for_live("/android/ffmpeg")
+
+    def test_preflight_surfaces_exec_failure(self):
+        from unittest import mock
+        from Libs.android_ffmpeg import validate_ffmpeg_for_live
+        with mock.patch("subprocess.run", side_effect=PermissionError("exec denied")):
+            with self.assertRaisesRegex(RuntimeError, "cannot run"):
+                validate_ffmpeg_for_live("/android/ffmpeg")
+
 if __name__ == "__main__":
     unittest.main()

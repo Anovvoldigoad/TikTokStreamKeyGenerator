@@ -43,3 +43,47 @@ def find_ffmpeg():
         "Android FFmpeg is not available as an executable native library. "
         "The APK must install libffmpeg_exec.so to its native library directory."
     )
+
+
+def validate_ffmpeg_for_live(path):
+    """Confirm the binary actually launches and has the required relay features.
+
+    Static ELF alignment and execute permission alone do not prove Android's
+    linker/SELinux will allow execve(). Do this before creating a TikTok room.
+    """
+    import subprocess
+
+    def inspect(option):
+        try:
+            result = subprocess.run(
+                [path, "-hide_banner", option], capture_output=True,
+                text=True, check=True, timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError(f"Android FFmpeg cannot run {option}: {exc}") from exc
+        return result.stdout + "\n" + result.stderr
+
+    protocols = inspect("-protocols")
+    sections = {"input": set(), "output": set()}
+    active = None
+    for line in protocols.splitlines():
+        label = line.strip().lower()
+        if label == "input:":
+            active = "input"
+        elif label == "output:":
+            active = "output"
+        elif active and label:
+            sections[active].add(label)
+    for protocol in ("rtmp", "rtmps"):
+        if any(protocol not in sections[direction] for direction in ("input", "output")):
+            raise RuntimeError(f"Android FFmpeg lacks required input/output protocol: {protocol}")
+
+    bsfs = set(inspect("-bsfs").split())
+    if "filter_units" not in bsfs:
+        raise RuntimeError("Android FFmpeg lacks filter_units H.264 bitstream filter")
+
+    # FLV must support both reading OBS video and publishing signed video.
+    formats = inspect("-formats")
+    if not any(line.strip().startswith("DE flv ") for line in formats.splitlines()):
+        raise RuntimeError("Android FFmpeg lacks FLV demuxer/muxer support")
+    return True
