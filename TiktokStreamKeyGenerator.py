@@ -11,7 +11,6 @@ if '--smoke-test' in sys.argv:
         faulthandler.enable(file=_release_smoke_log, all_threads=True)
         print('Starting packaged module imports', file=_release_smoke_log, flush=True)
 
-import truststore
 import hashlib
 import copy
 from collections import OrderedDict
@@ -71,7 +70,12 @@ from PySide6.QtWidgets import (
 if sys.platform == "win32":
     import winreg
 
-truststore.inject_into_ssl()
+# Android uses the platform trust chain. The desktop truststore injection is
+# not supported on every embedded Android Python runtime.
+from Libs.app_paths import is_android_runtime
+if not is_android_runtime():
+    import truststore
+    truststore.inject_into_ssl()
 
 from Libs.fluent_ui import (
     CheckBox as QCheckBox, ComboBox as QComboBox, EditableComboBox, LineEdit as QLineEdit,
@@ -250,6 +254,9 @@ def _is_macos_app_bundle():
 
 
 def _user_data_dir():
+    if is_android_runtime():
+        from Libs.app_paths import android_data_dir
+        return android_data_dir()
     # Config, the default cookies file, and logs live next to the
     # executable on Windows/Linux (portable style). macOS .app bundles use
     # the standard per-user Application Support folder instead.
@@ -2899,7 +2906,7 @@ def _app_executable_path():
 def _runtime_logs_dir():
     # macOS .app bundles keep logs with the other user data; the bundle
     # itself is not a durable, writable location.
-    base = _user_data_dir() if _is_macos_app_bundle() else _runtime_base_dir()
+    base = _user_data_dir() if (_is_macos_app_bundle() or is_android_runtime()) else _runtime_base_dir()
     preferred = os.path.join(base, "logs")
     try:
         os.makedirs(preferred, exist_ok=True)
@@ -2913,7 +2920,11 @@ def _runtime_logs_dir():
 def _bundled_ffmpeg_path():
     exe_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
     base_dir = _runtime_base_dir()
+    # An Android package may place an executable alongside native libraries.
+    # Never assume an FFmpeg executable exists just because Qt launched.
+    android_binary = os.environ.get("TIKTOK_ANDROID_FFMPEG", "") if is_android_runtime() else ""
     candidates = [
+        android_binary,
         os.path.join(base_dir, "bin", exe_name),
         os.path.join(base_dir, exe_name),
         os.path.join(os.getcwd(), "bin", exe_name),
@@ -2924,9 +2935,14 @@ def _bundled_ffmpeg_path():
         candidates.append(found_in_path)
 
     for candidate in candidates:
-        if candidate and os.path.exists(candidate):
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
 
+    if is_android_runtime():
+        raise FileNotFoundError(
+            "Android FFmpeg executable is not packaged or not executable. "
+            "LIVE cannot start safely until the signed SEI proxy is ported."
+        )
     raise FileNotFoundError(
         "FFmpeg was not found. Put ffmpeg in the app's bin folder or add it to PATH."
     )
@@ -3250,7 +3266,7 @@ class StreamKeyGeneratorWindow(AccentWindow):
         configure_fluent_theme()
         self.setWindowTitle("TikTok Stream Key Generator")
         self.setWindowIcon(_application_icon())
-        self.setMinimumSize(900, 580)
+        self.setMinimumSize(320, 480) if is_android_runtime() else self.setMinimumSize(900, 580)
         self._workspace_restoring = True
         self.device_initialization_in_flight = False
         self.device_initialization_attempted = False
@@ -7019,6 +7035,14 @@ class StreamKeyGeneratorWindow(AccentWindow):
 
         if not self.ensure_rapidapi_signer():
             return
+        # Guard before any TikTok room-creation API request. Creating a room
+        # without a working relay leaves a LIVE running but unusable.
+        if is_android_runtime():
+            try:
+                _bundled_ffmpeg_path()
+            except (FileNotFoundError, PermissionError) as exc:
+                self.show_error(str(exc))
+                return
         self.save_config(show_message=False)
 
         stream_started = False
@@ -7692,8 +7716,11 @@ def main():
     app = QApplication(sys.argv)
     app.setWindowIcon(_application_icon())
     window = StreamKeyGeneratorWindow()
-    window.resize(1040, 640)
-    window.show()
+    if is_android_runtime():
+        window.showMaximized()
+    else:
+        window.resize(1040, 640)
+        window.show()
     sys.exit(app.exec())
 
 

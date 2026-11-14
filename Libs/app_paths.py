@@ -15,6 +15,29 @@ import os
 import sys
 
 
+def is_android_runtime() -> bool:
+    """Detect CPython on Android, including python-for-android builds."""
+    return (
+        sys.platform == "android"
+        or callable(getattr(sys, "getandroidapilevel", None))
+        or bool(os.environ.get("ANDROID_PRIVATE"))
+    )
+
+
+def android_data_dir() -> str:
+    """Return private, writable app data; never put credentials in APK assets."""
+    if not is_android_runtime():
+        raise RuntimeError("Not running on Android")
+    base = os.environ.get("ANDROID_PRIVATE", "")
+    if not base:
+        from PySide6.QtCore import QStandardPaths
+        base = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
+    if not base:
+        raise RuntimeError("Android private storage path is unavailable")
+    os.makedirs(base, exist_ok=True)
+    return os.path.abspath(base)
+
+
 def _is_frozen_build() -> bool:
     return bool(getattr(sys, "frozen", False) or globals().get("__compiled__"))
 
@@ -24,6 +47,8 @@ def is_macos_app_bundle() -> bool:
 
 
 def user_data_dir() -> str:
+    if is_android_runtime():
+        return android_data_dir()
     if is_macos_app_bundle():
         base = os.path.join(
             os.path.expanduser("~"),

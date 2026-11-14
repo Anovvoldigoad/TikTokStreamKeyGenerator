@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
-from curl_cffi import requests
+from Libs.signer_http import requests
 from Libs.error_reporting import HostedSignerError, SignerFailureKind
 
 try:
