@@ -57,6 +57,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install 'PySide6==6.12.0'
           python -m pip install -r requirements-android.txt
+          # Fail quickly if the application cannot even import with Android
+          # settings and no curl_cffi (the Android signer transport path).
+          mkdir -p "$RUNNER_TEMP/tiktok-android-private"
+          ANDROID_PRIVATE="$RUNNER_TEMP/tiktok-android-private" QT_QPA_PLATFORM=offscreen \
+            python -c "import TiktokStreamKeyGenerator; from Libs.android_proxy import AndroidProxyProcess; print('Android-mode Python imports PASS')"
           python -m pip install -r "$(python - <<'PY'
           import pathlib, PySide6
           print(pathlib.Path(PySide6.__file__).parent / "scripts" / "requirements-android.txt")
