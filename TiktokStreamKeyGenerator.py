@@ -2918,6 +2918,9 @@ def _runtime_logs_dir():
 
 
 def _bundled_ffmpeg_path():
+    if is_android_runtime():
+        from Libs.android_ffmpeg import find_ffmpeg
+        return find_ffmpeg()
     exe_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
     base_dir = _runtime_base_dir()
     # An Android package may place an executable alongside native libraries.

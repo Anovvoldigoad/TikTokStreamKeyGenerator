@@ -22,7 +22,7 @@ jobs:
       - name: Run Android compatibility unit tests
         run: |
           python -m pip install requests
-          python -m unittest -v tests.test_android_port
+          python -m unittest -v tests.test_android_port tests.test_android_build_spec
 
   package-debug-apk:
     needs: offline-tests
@@ -70,6 +70,15 @@ jobs:
             'https://download.qt.io/official_releases/QtForPython/shiboken6/shiboken6-6.12.0-6.12.0-cp310-abi3-android_aarch64.whl' \
             --output 'android-wheels/shiboken6-6.12.0-6.12.0-cp310-abi3-android_aarch64.whl'
           for wheel in android-wheels/*.whl; do unzip -tq "$wheel"; done
+      - name: Stage pinned native arm64 FFmpeg
+        run: |
+          set -euo pipefail
+          mkdir -p android-native/arm64-v8a
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://raw.githubusercontent.com/hzw1199/Android-FFmpeg-Prebuilt/90231cc0105aef4f76926b911535f5eb73511b86/ffmpeg-9.0/bin/ffmpeg' \
+            --output android-native/arm64-v8a/libffmpeg_exec.so
+          test "$(git hash-object android-native/arm64-v8a/libffmpeg_exec.so)" = "602b24c9e967863ff608a685eaaad10ea6711758"
+          readelf -h android-native/arm64-v8a/libffmpeg_exec.so | grep -q 'AArch64'
       - name: Build arm64 Qt Android package (bootstrap verification only)
         run: |
           set -euo pipefail
@@ -92,6 +101,15 @@ jobs:
           PY
           echo "PYSIDE_WHEEL=$PYSIDE_WHEEL"
           echo "SHIBOKEN_WHEEL=$SHIBOKEN_WHEEL"
+          # Create Qt recipes/spec before altering Python requirements, otherwise
+          # the default Qt generator silently packages only shiboken6/PySide6.
+          pyside6-android-deploy --init -f --name 'TikTokStreamKeyGenerator' \
+            --wheel-pyside="$PYSIDE_WHEEL" \
+            --wheel-shiboken="$SHIBOKEN_WHEEL" \
+            --ndk-path="$ANDROID_HOME/ndk/28.2.13676358" \
+            --sdk-path="$ANDROID_HOME" \
+            --extra-modules="Svg,Network"
+          python scripts/configure_android_buildozer.py buildozer.spec
           pyside6-android-deploy -f --name 'TikTokStreamKeyGenerator' \
             --wheel-pyside="$PYSIDE_WHEEL" \
             --wheel-shiboken="$SHIBOKEN_WHEEL" \
@@ -99,7 +117,10 @@ jobs:
             --sdk-path="$ANDROID_HOME" \
             --extra-modules="Svg,Network"
           find . -name '*.apk' -type f -print
-          test "$(find . -name '*.apk' -type f | wc -l)" -ge 1
+          APK="$(find . -name '*.apk' -type f | head -1)"
+          test -n "$APK" && test -s "$APK"
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/libffmpeg_exec.so'
+          echo 'APK contains the pinned FFmpeg binary; runtime parity remains unverified.'
       - name: Archive debug bootstrap APK for internal diagnosis
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

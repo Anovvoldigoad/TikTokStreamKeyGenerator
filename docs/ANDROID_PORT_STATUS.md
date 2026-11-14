@@ -12,10 +12,14 @@ remains the behavioral reference. **No functional Android APK is claimed yet.**
   do not commit `cookies*.json`, `config.json` or signer secrets.
 - The Android entrypoint uses API signing, never unpublished development code.
 - The UI window minimum size and launch behavior are adapted for the handset.
+- Qt-generated Buildozer configuration is patched to include the app's Python
+  dependencies rather than the Qt/shiboken-only default.
 
 ## Known blockers — all required before a parity release
-1. Package and execute 16-KiB-compatible Android arm64 FFmpeg, including
-   RTMP listen and push, FLV, H.264/HEVC bitstream filters, and network TLS.
+1. CI stages a Git-blob-pinned 16-KiB-compatible Android ARM64 FFmpeg ELF as
+   libffmpeg_exec.so and configures Qt/Buildozer to package it. Verify the
+   real APK installs/extracts the binary and can run RTMP listen/push on-device.
+   ELF/ABI audit alone does not establish runtime compatibility.
 2. The desktop child-Python relay now has an Android-managed thread path using
    the same SEI signer/injector. Offline stop tests are present; live FFmpeg
    subprocess lifecycle and simultaneous dual streams need device validation.
