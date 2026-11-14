@@ -103,19 +103,16 @@ jobs:
           echo "SHIBOKEN_WHEEL=$SHIBOKEN_WHEEL"
           # Create Qt recipes/spec before altering Python requirements, otherwise
           # the default Qt generator silently packages only shiboken6/PySide6.
-          pyside6-android-deploy --init -f --name 'TikTokStreamKeyGenerator' \
+          pyside6-android-deploy --init --keep-deployment-files -f --name 'TikTokStreamKeyGenerator' \
             --wheel-pyside="$PYSIDE_WHEEL" \
             --wheel-shiboken="$SHIBOKEN_WHEEL" \
             --ndk-path="$ANDROID_HOME/ndk/28.2.13676358" \
             --sdk-path="$ANDROID_HOME" \
             --extra-modules="Svg,Network"
           python scripts/configure_android_buildozer.py buildozer.spec
-          pyside6-android-deploy -f --name 'TikTokStreamKeyGenerator' \
-            --wheel-pyside="$PYSIDE_WHEEL" \
-            --wheel-shiboken="$SHIBOKEN_WHEEL" \
-            --ndk-path="$ANDROID_HOME/ndk/28.2.13676358" \
-            --sdk-path="$ANDROID_HOME" \
-            --extra-modules="Svg,Network"
+          # Qt's deploy launcher deletes buildozer.spec on every invocation.
+          # Build directly after --init so the tested app dependency edits survive.
+          python -m buildozer android debug
           find . -name '*.apk' -type f -print
           APK="$(find . -name '*.apk' -type f | head -1)"
           test -n "$APK" && test -s "$APK"
