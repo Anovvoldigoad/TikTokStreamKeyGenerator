@@ -117,7 +117,8 @@ jobs:
           APK="$(find . -name '*.apk' -type f | head -1)"
           test -n "$APK" && test -s "$APK"
           unzip -l "$APK" | grep -q 'lib/arm64-v8a/libffmpeg_exec.so'
-          echo 'APK contains the pinned FFmpeg binary; runtime parity remains unverified.'
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
+          echo 'APK contains FFmpeg and INTERNET permission; runtime parity remains unverified.'
       - name: Archive debug bootstrap APK for internal diagnosis
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

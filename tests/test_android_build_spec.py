@@ -21,6 +21,15 @@ class AndroidBuildSpecTests(unittest.TestCase):
         self.assertIn("p4a.bootstrap = qt", target)
         self.assertIn("android.permissions = INTERNET", target)
         self.assertLess(target.index("android.add_libs_arm64_v8a"), target.index("[buildozer]"))
+        self.assertLess(target.index("android.permissions = INTERNET"), target.index("[buildozer]"))
+
+    def test_adds_network_permission_without_discarding_qt_permissions(self):
+        source = (
+            "[app]\nrequirements = python3\nsource.include_exts = py\n"
+            "android.permissions = CAMERA,ACCESS_NETWORK_STATE\n[buildozer]\n"
+        )
+        updated = configure(source)
+        self.assertIn("android.permissions = CAMERA,ACCESS_NETWORK_STATE,INTERNET", updated)
 
     def test_rejects_missing_required_qt_settings(self):
         with self.assertRaisesRegex(ValueError, "missing expected keys"):

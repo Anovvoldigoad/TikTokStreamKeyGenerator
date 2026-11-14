@@ -25,6 +25,12 @@ def configure(original):
             if key == "requirements":
                 line = "requirements = " + REQUIREMENTS + "\n"
                 replaced.add(key)
+            elif key == "android.permissions":
+                existing = [x.strip() for x in stripped.partition("=")[2].split(",") if x.strip()]
+                if not any(x in ("INTERNET", "android.permission.INTERNET") for x in existing):
+                    existing.append("INTERNET")
+                line = "android.permissions = " + ",".join(existing) + "\n"
+                replaced.add(key)
             elif key == "source.include_exts":
                 old = stripped.partition("=")[2].strip().split("#", 1)[0]
                 exts = [x.strip() for x in old.split(",") if x.strip()]
@@ -46,6 +52,8 @@ def configure(original):
     )
     output.insert(next_section, f"android.add_libs_arm64_v8a = {FFMPEG_LIB}\n")
     output.insert(next_section, "# Pinned 16 KiB-compatible ARM64 FFmpeg executable.\n")
+    if "android.permissions" not in replaced:
+        output.insert(next_section, "android.permissions = INTERNET\n")
     return "".join(output)
 
 
