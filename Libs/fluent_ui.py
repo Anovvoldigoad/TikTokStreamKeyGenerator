@@ -157,7 +157,15 @@ def _android_choose_action(menu):
         return True
     dialog.exec()
     if chosen:
-        chosen[0].trigger()
+        action = chosen[0]
+        submenu = action.menu()
+        if submenu is not None:
+            # Workspace -> Views and similar nested actions must keep the
+            # native-menu workaround; triggering a submenu QAction is not
+            # equivalent to opening its child actions.
+            _android_choose_action(submenu)
+        else:
+            action.trigger()
     dialog.deleteLater()
     return True
 

@@ -65,6 +65,28 @@ class AndroidModalSurfaceTests(unittest.TestCase):
         combo._showComboMenu()
         self.assertEqual(combo.currentData(), "mobile")
 
+    def test_nested_workspace_menu_action_is_accessible(self):
+        root = fluent_ui.RoundMenu("Workspace", self.host)
+        submenu = fluent_ui.CheckableMenu("Views", root)
+        selected = []
+        action = fluent_ui.Action("Audience", self.host)
+        action.setCheckable(True)
+        action.setChecked(True)
+        action.toggled.connect(lambda enabled: selected.append(enabled))
+        submenu.addAction(action)
+        root.addMenu(submenu)
+
+        def choose_menu():
+            QTimer.singleShot(0, lambda: next(
+                child for child in self.host.findChildren(QPushButton)
+                if child.text() == "Audience").click())
+            next(child for child in self.host.findChildren(QPushButton)
+                 if child.text() == "Views").click()
+
+        QTimer.singleShot(0, choose_menu)
+        root.exec(self.host.mapToGlobal(self.host.rect().center()))
+        self.assertEqual(selected, [False])
+
     def test_menu_action_is_triggered_without_native_popup(self):
         menu = fluent_ui.RoundMenu("Actions", self.host)
         selected = []
