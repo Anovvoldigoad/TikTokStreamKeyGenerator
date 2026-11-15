@@ -25,7 +25,10 @@ def audit_bundle(root):
     root = Path(root)
     if not (root / "PySide6" / "QtWidgets.abi3.so").is_file():
         raise ValueError("Android PySide6 QtWidgets is missing")
-    if not (root / "charset_normalizer" / "md.py").is_file():
+    # python-for-android precompiles source modules; the bundled fallback
+    # can therefore be md.pyc without retaining md.py.
+    if not any((root / "charset_normalizer" / name).is_file()
+               for name in ("md.py", "md.pyc")):
         raise ValueError("charset-normalizer pure-Python fallback is missing")
     checked = 0
     wrong = []

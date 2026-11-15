@@ -23,6 +23,15 @@ class AndroidRuntimeElfTests(unittest.TestCase):
             path.write_bytes(fake_elf(183))
             self.assertEqual(elf_machine(path), 183)
 
+    def test_bytecode_only_fallback_is_accepted(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "PySide6").mkdir()
+            (root / "charset_normalizer").mkdir()
+            (root / "charset_normalizer" / "md.pyc").write_bytes(b"fixture")
+            (root / "PySide6" / "QtWidgets.abi3.so").write_bytes(fake_elf(183))
+            self.assertEqual(audit_bundle(root), 1)
+
     def test_foreign_binary_fails_release_audit(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
