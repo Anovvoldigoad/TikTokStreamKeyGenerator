@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
@@ -75,6 +75,26 @@ class AndroidToolButtonTests(unittest.TestCase):
                 self.window.start_login()
             dialog.assert_called_once()
             register.assert_not_called()
+
+    def test_account_menu_tap_can_open_login_without_device_ids(self):
+        # Use a real synthetic pointer click, not a direct handler call.
+        # DropDownPushButton opens its menu in mouseReleaseEvent.
+        self.window.device_id = ""
+        self.window.install_id = ""
+        self.window.update_stream_controls(has_cookies=False)
+        self.window.sync_workspace_actions()
+        with patch.object(app.LoginDialog, "exec",
+                          return_value=QDialog.DialogCode.Rejected) as login:
+            def choose_login():
+                from PySide6.QtWidgets import QPushButton
+                candidates = [item for item in
+                              self.window.findChildren(QPushButton)
+                              if item.isVisible() and item.text() == "Log in with QR code"]
+                self.assertEqual(len(candidates), 1)
+                candidates[0].click()
+            QTimer.singleShot(0, choose_login)
+            QTest.mouseClick(self.window.account_menu_button, Qt.LeftButton)
+            login.assert_called_once()
 
     def test_qr_login_does_not_start_without_device_ids(self):
         with patch.object(app.LoginDialog, "load_qr_code") as qr:
