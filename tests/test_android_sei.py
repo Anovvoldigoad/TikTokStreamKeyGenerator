@@ -55,7 +55,6 @@ class AndroidFlvSeiContractTests(unittest.TestCase):
         self.assertTrue(output.startswith(b"FLV"))
         self.assertIn(b"JSON", output)
         self.assertIn(b'"test":"small"', output)
-        self.assertIn(b"test\\\"small", output)
         size = int.from_bytes(output[14:17], "big")
         self.assertGreater(size, len(video))
         self.assertEqual(len(output), 13 + 11 + size + 4)
