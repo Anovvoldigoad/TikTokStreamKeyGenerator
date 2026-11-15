@@ -79,7 +79,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/tiktok-android-private"
           ANDROID_PRIVATE="$RUNNER_TEMP/tiktok-android-private" QT_QPA_PLATFORM=offscreen \
-            python -m unittest -v tests.test_android_live_contract tests.test_android_gui_smoke tests.test_android_qr
+            python -m unittest -v tests.test_android_live_contract tests.test_android_gui_smoke tests.test_android_modal_surfaces tests.test_android_qr
       - name: Stage pinned native arm64 FFmpeg
         run: |
           set -euo pipefail

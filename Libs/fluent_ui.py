@@ -1,7 +1,11 @@
 """Shared Fluent controls for the existing PySide6 application."""
-from PySide6.QtCore import QObject, Qt, QTimer
+from PySide6.QtCore import QEventLoop, QObject, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPalette
-from PySide6.QtWidgets import QApplication, QDialog as QtDialog, QLabel, QGridLayout, QVBoxLayout, QWidget, QSizePolicy, QToolTip, QMessageBox as QtMessageBox
+from PySide6.QtWidgets import (QApplication, QDialog as QtDialog, QFrame, QHBoxLayout,
+    QLabel, QGridLayout, QScrollArea, QVBoxLayout, QWidget, QSizePolicy, QToolTip,
+    QMessageBox as QtMessageBox)
+from Libs.app_paths import is_android_runtime
+
 from qfluentwidgets import (
     Action, BodyLabel, CaptionLabel, CardWidget, CheckBox, CheckableMenu as FluentCheckableMenu, ComboBox as FluentComboBox,
     DropDownPushButton, EditableComboBox as FluentEditableComboBox,
@@ -69,7 +73,98 @@ class LineEdit(FluentLineEdit):
         self.setText(str(text))
 
 
+def _android_embedded_dialog_exec(dialog):
+    """Run a modal dialog as a child widget, without an Android EGL window.
+
+    Qt 6.12.0's Android backing store can abort when opening another
+    top-level Qt window. Keep dialog widgets on the already exposed main
+    activity surface, retaining QDialog accept/reject and result semantics.
+    """
+    parent = dialog.parentWidget()
+    if parent is None:
+        return QtDialog.exec(dialog)
+    host = parent.window()
+    sheet = QWidget(host)
+    sheet.setObjectName('androidModalSheet')
+    sheet.setAutoFillBackground(True)
+    sheet.setGeometry(host.rect())
+    layout = QVBoxLayout(sheet)
+    toolbar = QHBoxLayout()
+    heading = QLabel(dialog.windowTitle() or 'Details', sheet)
+    close_button = PushButton('Close', sheet)
+    close_button.clicked.connect(dialog.reject)
+    toolbar.addWidget(heading, 1)
+    toolbar.addWidget(close_button)
+    layout.addLayout(toolbar)
+    scroll = QScrollArea(sheet)
+    scroll.setFrameShape(QFrame.NoFrame)
+    scroll.setWidgetResizable(True)
+    layout.addWidget(scroll, 1)
+    dialog.setWindowFlags(Qt.Widget)
+    scroll.setWidget(dialog)
+    loop = QEventLoop(sheet)
+    dialog.finished.connect(loop.quit)
+    try:
+        sheet.show()
+        sheet.raise_()
+        dialog.show()
+        loop.exec()
+        return dialog.result()
+    finally:
+        dialog.hide()
+        scroll.takeWidget()
+        dialog.setParent(host, Qt.Widget)
+        sheet.hide()
+        sheet.deleteLater()
+
+
+def _android_choose_action(menu):
+    """Replace native QMenu popup surfaces with an in-window action sheet."""
+    parent = menu.parentWidget()
+    if parent is None:
+        return False
+    dialog = AccentDialog(parent.window())
+    dialog.setWindowTitle(menu.title() or 'Choose an action')
+    layout = QVBoxLayout(dialog)
+    chosen = []
+    for action in menu.actions():
+        if action.isSeparator():
+            continue
+        button = PushButton(action.text() or 'Action', dialog)
+        button.setEnabled(action.isEnabled())
+        button.clicked.connect(lambda checked=False, item=action: (chosen.append(item), dialog.accept()))
+        layout.addWidget(button)
+    if not layout.count():
+        return True
+    dialog.exec()
+    if chosen:
+        chosen[0].trigger()
+    dialog.deleteLater()
+    return True
+
+
+def _android_choose_combo_item(combo):
+    """Keep Fluent combo choices inside the Android activity's Qt surface."""
+    if not combo.items:
+        return
+    dialog = AccentDialog(combo.window())
+    dialog.setWindowTitle('Select an option')
+    layout = QVBoxLayout(dialog)
+    for index, item in enumerate(combo.items):
+        button = PushButton(item.text or '(None)', dialog)
+        button.setEnabled(item.isEnabled)
+        button.clicked.connect(lambda checked=False, i=index: (combo._onItemClicked(i), dialog.accept()))
+        layout.addWidget(button)
+    dialog.exec()
+    dialog.deleteLater()
+
+
 class ComboBox(FluentComboBox):
+    def _showComboMenu(self):
+        if is_android_runtime():
+            return _android_choose_combo_item(self)
+        return super()._showComboMenu()
+
     def _createComboMenu(self):
         return _accent_menu(super()._createComboMenu())
 
@@ -79,6 +174,11 @@ class ComboBox(FluentComboBox):
 
 
 class EditableComboBox(FluentEditableComboBox):
+    def _showComboMenu(self):
+        if is_android_runtime():
+            return _android_choose_combo_item(self)
+        return super()._showComboMenu()
+
     def _createComboMenu(self):
         return _accent_menu(super()._createComboMenu())
 
@@ -295,11 +395,21 @@ class AccentWindow(_AccentSurface, QWidget):
 
 
 class AccentDialog(_AccentSurface, QtDialog):
-    """Use the workspace surface in app dialogs with a native title bar."""
+    """Workspace dialog; on Android, avoid extra native EGL windows."""
+
+    def exec(self):
+        if is_android_runtime():
+            return _android_embedded_dialog_exec(self)
+        return super().exec()
 
 
 class AccentMessageBox(QtMessageBox):
     """Qt message-box semantics with the workspace's theme and accent surface."""
+
+    def exec(self):
+        if is_android_runtime():
+            return _android_embedded_dialog_exec(self)
+        return super().exec()
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setOption(QtMessageBox.Option.DontUseNativeDialog, True)
@@ -388,6 +498,8 @@ class RoundMenu(FluentRoundMenu):
         _accent_menu(self)
 
     def exec(self, *args, **kwargs):
+        if is_android_runtime() and _android_choose_action(self):
+            return None
         # PySide can re-expose QMenu.exec on a further Python subclass unless
         # this method is explicit. Keep Fluent's animated, nonblocking popup.
         return FluentRoundMenu.exec(self, *args, **kwargs)
@@ -399,6 +511,8 @@ class CheckableMenu(FluentCheckableMenu):
         _accent_menu(self)
 
     def exec(self, *args, **kwargs):
+        if is_android_runtime() and _android_choose_action(self):
+            return None
         return FluentCheckableMenu.exec(self, *args, **kwargs)
 
 

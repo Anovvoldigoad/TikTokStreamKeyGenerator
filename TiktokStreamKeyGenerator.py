@@ -5349,10 +5349,12 @@ class StreamKeyGeneratorWindow(AccentWindow):
         if selected in games:
             self.game_combo.setCurrentText(games[selected])
         self.game_combo.setPlaceholderText('Select a game' if games else 'Games unavailable; reopen the app to retry')
-        completer = QCompleter(list(games.values()), self)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        completer.setFilterMode(Qt.MatchContains)
-        self.game_combo.setCompleter(completer)
+        if not is_android_runtime():
+            # Fluent's completer opens a separate Qt popup surface on Android.
+            completer = QCompleter(list(games.values()), self)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchContains)
+            self.game_combo.setCompleter(completer)
         self.sync_activity_spinner()
 
     def open_campaigns(self):
