@@ -7073,7 +7073,11 @@ class StreamKeyGeneratorWindow(AccentWindow):
         if is_android_runtime():
             try:
                 from Libs.android_ffmpeg import validate_ffmpeg_for_live
-                validate_ffmpeg_for_live(_bundled_ffmpeg_path())
+                ffmpeg_path = _bundled_ffmpeg_path()
+                # This launches three native FFmpeg probes. Never run them on
+                # the Qt GUI thread; they can block for up to 45 seconds.
+                (yield Work(validate_ffmpeg_for_live, ffmpeg_path,
+                            label='Checking Android FFmpeg capabilities…'))
             except (OSError, RuntimeError) as exc:
                 self.show_error(str(exc))
                 return

@@ -22,7 +22,7 @@ jobs:
       - name: Run Android compatibility unit tests
         run: |
           python -m pip install requests
-          python -m unittest -v tests.test_android_port tests.test_android_build_spec tests.test_live_start_safety tests.test_cookie_payload tests.test_android_lifecycle tests.test_android_sei
+          python -m unittest -v tests.test_android_port tests.test_android_build_spec tests.test_android_elf_audit tests.test_live_start_safety tests.test_cookie_payload tests.test_android_lifecycle tests.test_android_sei
 
   package-debug-apk:
     needs: offline-tests
@@ -79,7 +79,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/tiktok-android-private"
           ANDROID_PRIVATE="$RUNNER_TEMP/tiktok-android-private" QT_QPA_PLATFORM=offscreen \
-            python -m unittest -v tests.test_android_live_contract tests.test_android_gui_smoke tests.test_android_modal_surfaces tests.test_android_qr
+            python -m unittest -v tests.test_android_live_contract tests.test_android_gui_smoke tests.test_android_modal_surfaces tests.test_android_qr tests.test_android_tools
       - name: Stage pinned native arm64 FFmpeg
         run: |
           set -euo pipefail
@@ -122,7 +122,10 @@ jobs:
           python scripts/configure_android_buildozer.py buildozer.spec
           # Qt's deploy launcher deletes buildozer.spec on every invocation.
           # Build directly after --init so the tested app dependency edits survive.
-          python -m buildozer android debug
+          # Plain pip wheel selection on the Linux host can copy x86_64
+          # charset-normalizer speedups into an Android Python bundle.
+          # Source builds keep the package's pure-Python fallback.
+          PIP_NO_BINARY=charset-normalizer CHARSET_NORMALIZER_USE_CYTHON=0 python -m buildozer android debug
           # p4a installs pure-Python requirements with --no-deps. Without
           # explicit requests dependencies, this APK can crash at import time.
           BUNDLE_DIR="$(find .buildozer/android/platform -type d -path '*/_python_bundle/site-packages' -print -quit)"
@@ -131,6 +134,7 @@ jobs:
             test -d "$BUNDLE_DIR/$package" || { echo "Missing Android Python dependency: $package" >&2; exit 1; }
           done
           test -f "$BUNDLE_DIR/certifi/cacert.pem"
+          python scripts/audit_android_python_bundle.py "$BUNDLE_DIR"
           find . -name '*.apk' -type f -print
           APK="$(find . -name '*.apk' -type f | head -1)"
           test -n "$APK" && test -s "$APK"
