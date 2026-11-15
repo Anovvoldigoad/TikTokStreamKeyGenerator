@@ -75,6 +75,11 @@ jobs:
             'https://download.qt.io/official_releases/QtForPython/shiboken6/shiboken6-6.12.0-6.12.0-cp310-abi3-android_aarch64.whl' \
             --output 'android-wheels/shiboken6-6.12.0-6.12.0-cp310-abi3-android_aarch64.whl'
           for wheel in android-wheels/*.whl; do unzip -tq "$wheel"; done
+      - name: Exercise PC LIVE endpoints without credentials or network calls
+        run: |
+          mkdir -p "$RUNNER_TEMP/tiktok-android-private"
+          ANDROID_PRIVATE="$RUNNER_TEMP/tiktok-android-private" QT_QPA_PLATFORM=offscreen \
+            python -m unittest -v tests.test_android_live_contract
       - name: Stage pinned native arm64 FFmpeg
         run: |
           set -euo pipefail
