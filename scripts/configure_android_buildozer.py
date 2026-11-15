@@ -10,7 +10,7 @@ import sys
 REQUIREMENTS = (
     "python3,shiboken6,PySide6,requests,websockets,"
     "PySide6-Fluent-Widgets,PySideSix-Frameless-Window,darkdetect,"
-    "pytz,python-dotenv,packaging,tzdata,pycryptodome"
+    "pytz,python-dotenv,packaging,tzdata,pycryptodome,segno"
 )
 FFMPEG_LIB = "android-native/arm64-v8a/libffmpeg_exec.so"
 

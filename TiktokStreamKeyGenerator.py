@@ -2446,11 +2446,16 @@ def _qrcode_png_base64(value):
         return ""
     try:
         import io
-        import qrcode
 
-        image = qrcode.make(value)
         buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
+        if is_android_runtime():
+            # segno's pure-Python PNG writer works in embedded Android Python;
+            # qrcode's default Pillow image factory has no Android wheel.
+            import segno
+            segno.make(value).save(buffer, kind="png", scale=6)
+        else:
+            import qrcode
+            qrcode.make(value).save(buffer, format="PNG")
         return base64.b64encode(buffer.getvalue()).decode("ascii")
     except Exception:
         return ""
