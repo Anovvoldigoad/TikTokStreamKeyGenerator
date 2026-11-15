@@ -150,26 +150,33 @@ def _android_choose_action(menu):
     dialog.setWindowTitle(menu.title() or 'Choose an action')
     layout = QVBoxLayout(dialog)
     chosen = []
-    for action in menu.actions():
-        if action.isSeparator():
+    # Fluent RoundMenu.addMenu() creates a QListWidgetItem carrying the
+    # submenu in Qt.UserRole; it does NOT add a corresponding QAction.
+    # Iterate its actual visible items to preserve actions and nested menus
+    # in their original order, including mixed action/submenu entries.
+    for index in range(menu.view.count()):
+        item = menu.view.item(index)
+        target = item.data(Qt.UserRole)
+        if target is None or (not isinstance(target, FluentRoundMenu) and target.isSeparator()):
             continue
-        button = PushButton(action.text() or 'Action', dialog)
-        button.setEnabled(action.isEnabled())
-        button.clicked.connect(lambda checked=False, item=action: (chosen.append(item), dialog.accept()))
+        button = PushButton(item.text() or 'Action', dialog)
+        button.setEnabled(target.isEnabled())
+        button.clicked.connect(lambda checked=False, selected=target: (chosen.append(selected), dialog.accept()))
         layout.addWidget(button)
-    if not layout.count():
+    if not chosen and layout.count() == 0:
+        dialog.deleteLater()
         return True
     dialog.exec()
     if chosen:
-        action = chosen[0]
-        submenu = action.menu()
-        if submenu is not None:
-            # Workspace -> Views and similar nested actions must keep the
-            # native-menu workaround; triggering a submenu QAction is not
-            # equivalent to opening its child actions.
-            _android_choose_action(submenu)
+        target = chosen[0]
+        if isinstance(target, FluentRoundMenu):
+            _android_choose_action(target)
         else:
-            action.trigger()
+            submenu = target.menu()
+            if submenu is not None:
+                _android_choose_action(submenu)
+            else:
+                target.trigger()
     dialog.deleteLater()
     return True
 

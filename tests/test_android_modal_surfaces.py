@@ -88,6 +88,28 @@ class AndroidModalSurfaceTests(unittest.TestCase):
         self.assertEqual(selected, [False])
         self.assertFalse(root.isVisible())
 
+    def test_mixed_menu_preserves_submenu_and_action_order(self):
+        root = fluent_ui.RoundMenu("Workspace", self.host)
+        first = fluent_ui.Action("Settings", self.host)
+        root.addAction(first)
+        submenu = fluent_ui.CheckableMenu("Views", root)
+        submenu.addAction(fluent_ui.Action("Audience", self.host))
+        root.addMenu(submenu)
+        last = fluent_ui.Action("Copy", self.host)
+        root.addAction(last)
+
+        observed = []
+
+        def choose():
+            buttons = [button.text() for button in self.host.findChildren(QPushButton)]
+            observed.extend(name for name in buttons if name in {"Settings", "Views", "Copy"})
+            next(button for button in self.host.findChildren(QPushButton)
+                 if button.text() == "Copy").click()
+
+        QTimer.singleShot(0, choose)
+        root.exec(self.host.mapToGlobal(self.host.rect().center()))
+        self.assertEqual(observed, ["Settings", "Views", "Copy"])
+
     def test_menu_action_is_triggered_without_native_popup(self):
         menu = fluent_ui.RoundMenu("Actions", self.host)
         selected = []
