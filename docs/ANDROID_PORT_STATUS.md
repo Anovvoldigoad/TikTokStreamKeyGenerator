@@ -28,8 +28,11 @@ remains the behavioral reference. **No functional Android APK is claimed yet.**
    confirms; test real on-device picker URI access and persistence.
 4. Check the Qt Fluent interface in portrait and landscape with the soft
    keyboard, font scaling and system back navigation.
-5. Keep heartbeats, proxy and chat running through Android background/Doze
-   lifecycle via an appropriate foreground service and notification.
+5. The Android entrypoint now sets QT_BLOCK_EVENT_LOOPS_WHEN_SUSPENDED=0
+   before Qt imports so the GUI QTimer heartbeat can continue when switching
+   to an encoder app. This is only a Qt lifecycle mitigation: Android can
+   still stop the process. A real foreground service and notification remain
+   necessary for reliable background/Doze operation.
 6. Test login/import, device registration, signer's rate limits, account
    eligibility, room creation/resume/end, proxy SEI, client ingestion and
    dual-layout with a consenting, eligible account.
