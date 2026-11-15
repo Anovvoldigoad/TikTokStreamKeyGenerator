@@ -29,7 +29,11 @@ class ModeTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = str(Path(self.temp.name) / 'config.json')
         self.cookies = str(Path(self.temp.name) / 'cookies.json')
-        Path(self.cookies).write_text('[]')
+        # Tests invoking Stream need a parseable synthetic session cookie;
+        # production validation must continue rejecting empty cookie exports.
+        Path(self.cookies).write_text(json.dumps([
+            {'name': 'sessionid', 'value': 'offline-only-fixture', 'domain': '.tiktok.com'}
+        ]))
         self.config = {'device_id': '111', 'install_id': '222', 'cookies_path': self.cookies,
                        'dual_layout_supported': True, 'custom_future_option': 'preserve', 'suppress_donation_reminder': True}
         Path(self.path).write_text(json.dumps(self.config))

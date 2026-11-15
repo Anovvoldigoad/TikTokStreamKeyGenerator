@@ -201,7 +201,7 @@ class ErrorReportingTests(unittest.TestCase):
 
     def test_proxy_log_closes_even_when_initialization_raises(self):
         captured = []
-        def fail(args, log):
+        def fail(args, log, **kwargs):
             captured.append(log)
             raise RuntimeError('Startup failure')
         path = Path(self.temp.name) / 'startup.log'
