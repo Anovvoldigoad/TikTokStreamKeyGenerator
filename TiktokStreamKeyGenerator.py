@@ -572,23 +572,11 @@ class Stream:
         )
         self.streamId = room.get("stream_id_str") or str(room.get("stream_id", ""))
         self.streamUrl = (room.get("stream_url") or {}).get("rtmp_push_url", "")
-        if self.streamUrl:
-            split_index = self.streamUrl.rfind("/")
-            self.baseStreamUrl = self.streamUrl[:split_index]
-            self.streamKey = self.streamUrl[split_index + 1 :]
-        else:
-            self.baseStreamUrl = ""
-            self.streamKey = ""
+        self.baseStreamUrl, self.streamKey = _split_rtmp_push_url(self.streamUrl)
 
         multi_stream_url = room.get("multi_stream_url") or {}
         self.multiStreamUrl = multi_stream_url.get("rtmp_push_url", "")
-        if self.multiStreamUrl:
-            split_index = self.multiStreamUrl.rfind("/")
-            self.multiBaseStreamUrl = self.multiStreamUrl[:split_index]
-            self.multiStreamKey = self.multiStreamUrl[split_index + 1 :]
-        else:
-            self.multiBaseStreamUrl = ""
-            self.multiStreamKey = ""
+        self.multiBaseStreamUrl, self.multiStreamKey = _split_rtmp_push_url(self.multiStreamUrl)
 
         self.multiStreamScene = room.get("multi_stream_scene")
         self.multiStreamId = (
@@ -607,7 +595,7 @@ class Stream:
             or str(owner.get("id") or "")
         )
         has_ids = bool(self.roomId and self.streamId)
-        has_push_url = bool(self.streamUrl)
+        has_push_url = bool(self.streamKey)
         return has_ids and (has_push_url or not require_stream_url)
 
     def save_cookies(self, path=None):
@@ -1240,7 +1228,7 @@ class Stream:
             if not isinstance(room, dict):
                 raise RuntimeError('Android dual creation returned no room.')
             ready = self._apply_room_info(room, require_stream_url=True)
-            if not (ready and distinct_push_urls(self.streamUrl, self.multiStreamUrl) and secondary_stream_id(room)):
+            if not (ready and self.multiStreamKey and distinct_push_urls(self.streamUrl, self.multiStreamUrl) and secondary_stream_id(room)):
                 message = 'TikTok did not allocate two distinct push URLs and a secondary stream ID for Android Dual Layout.'
                 if self.roomId and self.streamId and self.roomId != previous_room_id:
                     try:
@@ -3001,12 +2989,38 @@ def _safe_log_tail(path, max_lines=30):
         return ""
 
 
+def _split_rtmp_push_url(value):
+    """Split complete TikTok push credentials without treating an app path as a key."""
+    if not isinstance(value, str) or not value:
+        return "", ""
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        if parsed.scheme.lower() not in ("rtmp", "rtmps") or not parsed.hostname:
+            return "", ""
+    except ValueError:
+        return "", ""
+
+    app_path, separator, stream_key = parsed.path.rpartition("/")
+    if not separator or not app_path.strip("/") or not stream_key:
+        return "", ""
+    base = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, app_path, "", ""))
+    if parsed.query:
+        stream_key += "?" + parsed.query
+    return base, stream_key
+
+
 def _mask_stream_url(value):
-    if not value.startswith("rtmp://"):
+    """Never write remote RTMP(S) push credentials into proxy logs."""
+    if not value.lower().startswith(("rtmp://", "rtmps://")):
         return value
-    if "?" not in value:
-        return value
-    return value.split("?", 1)[0] + "?..."
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        if (parsed.hostname in ("127.0.0.1", "::1", "localhost")
+                and not (parsed.username or parsed.password or parsed.query or parsed.fragment)):
+            return value
+        return f"{parsed.scheme}://[stream-endpoint-redacted]"
+    except ValueError:
+        return "[stream-endpoint-redacted]"
 
 
 # ----------------------------------------------------------------------

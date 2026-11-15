@@ -105,6 +105,46 @@ class AndroidPcLiveContractTests(unittest.TestCase):
             self.assertEqual(ping.call_args.kwargs["stream_id"], "9000")
             self.assertEqual(ping.call_args.kwargs["repeat"], 2)
 
+    def test_complete_rtmps_push_url_keeps_signed_key_and_query(self):
+        room = {
+            "living_room_attrs": {"room_id_str": "8123"},
+            "stream_id_str": "9000",
+            "stream_url": {
+                "rtmp_push_url": "rtmps://stream.example.test/live/secret-key?auth=a/b",
+            },
+        }
+        self.assertTrue(self.stream._apply_room_info(room))
+        self.assertEqual(self.stream.baseStreamUrl, "rtmps://stream.example.test/live")
+        self.assertEqual(self.stream.streamKey, "secret-key?auth=a/b")
+
+    def test_incomplete_push_url_is_not_reported_as_a_usable_stream(self):
+        for url in (
+            "rtmps://stream.example.test/live/",
+            "rtmp://stream.example.test",
+            "https://stream.example.test/live/not-rtmp",
+            "rtmp://stream.example.test/live",
+        ):
+            with self.subTest(url=url):
+                room = {
+                    "living_room_attrs": {"room_id_str": "8123"},
+                    "stream_id_str": "9000",
+                    "stream_url": {"rtmp_push_url": url},
+                }
+                self.assertFalse(self.stream._apply_room_info(room))
+                self.assertEqual(self.stream.streamKey, "")
+
+    def test_proxy_command_logs_redact_remote_stream_credentials(self):
+        from TiktokStreamKeyGenerator import _mask_stream_url
+        for url in ("rtmp://host.example/live/secret", "rtmps://host.example/live/secret?token=xyz"):
+            with self.subTest(url=url):
+                masked = _mask_stream_url(url)
+                self.assertNotIn("secret", masked)
+                self.assertNotIn("token", masked)
+                self.assertNotIn("xyz", masked)
+        local = "rtmp://127.0.0.1:19350/live/obs"
+        self.assertEqual(_mask_stream_url(local), local)
+
+
 
 if __name__ == "__main__":
     unittest.main()
