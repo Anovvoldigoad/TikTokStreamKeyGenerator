@@ -6140,7 +6140,11 @@ class StreamKeyGeneratorWindow(AccentWindow):
         if self.studio_import_button is not None:
             self.studio_import_button.setEnabled(not busy)
         self.mobile_broadcast_options.setEnabled(not busy)
-        self.login_button.setEnabled(self.device_type == "pc" and self.has_device_identifiers())
+        # On Android, Login also opens the cookies importer. A missing PC
+        # device registration must not make that offline import inaccessible.
+        # QR login itself still checks registered device IDs before starting.
+        self.login_button.setEnabled(self.device_type == "pc" and
+            (self.has_device_identifiers() or is_android_runtime()))
         if has_cookies is None:
             has_cookies = self.get_cookie_file_status()[0]
 

@@ -57,7 +57,18 @@ class AndroidToolButtonTests(unittest.TestCase):
             browse.assert_called_once()
 
     def test_login_import_is_available_without_device_registration(self):
-        # The import tool must not depend on network registration success.
+        # The importer must remain reachable through the Account menu even
+        # when no registered device IDs have been issued on Android.
+        self.window.device_id = ""
+        self.window.install_id = ""
+        self.window.update_stream_controls(has_cookies=False)
+        self.window.sync_workspace_actions()
+        self.assertTrue(self.window.login_button.isEnabled())
+        self.assertFalse(self.window.go_live_button.isEnabled())
+        login_action = next(action for action, button
+                            in self.window.workspace_action_controls.items()
+                            if button is self.window.login_button)
+        self.assertTrue(login_action.isEnabled())
         with patch.object(app.LoginDialog, "exec",
                           return_value=QDialog.DialogCode.Rejected) as dialog:
             with patch.object(self.window, "ensure_device_identifiers") as register:
