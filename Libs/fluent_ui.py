@@ -140,6 +140,10 @@ def _android_embedded_dialog_exec(dialog):
 def _android_choose_action(menu):
     """Replace native QMenu popup surfaces with an in-window action sheet."""
     parent = menu.parentWidget()
+    # Nested QMenus are themselves QWidget windows. Always anchor the
+    # Android action sheet to the actual activity, never to a parent menu.
+    while isinstance(parent, FluentRoundMenu):
+        parent = parent.parentWidget()
     if parent is None:
         return False
     dialog = AccentDialog(parent.window())

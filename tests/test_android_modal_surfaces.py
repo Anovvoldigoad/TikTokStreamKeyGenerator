@@ -86,6 +86,7 @@ class AndroidModalSurfaceTests(unittest.TestCase):
         QTimer.singleShot(0, choose_menu)
         root.exec(self.host.mapToGlobal(self.host.rect().center()))
         self.assertEqual(selected, [False])
+        self.assertFalse(root.isVisible())
 
     def test_menu_action_is_triggered_without_native_popup(self):
         menu = fluent_ui.RoundMenu("Actions", self.host)
