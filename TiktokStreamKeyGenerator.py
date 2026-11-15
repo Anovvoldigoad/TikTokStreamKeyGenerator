@@ -7718,7 +7718,9 @@ class LoginDialog(QDialog):
             return
         self.cleanup()
         self.accept()
-        self.parent_window.browse_cookies_file()
+        # The Android SAF file picker must open only after the embedded QR
+        # dialog has finished and detached from the activity surface.
+        single_shot(self.parent_window, 0, self.parent_window.browse_cookies_file)
 
     def open_browser_login(self):
         self.cleanup()

@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtCore import QTimer
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
 import TiktokStreamKeyGenerator as app
@@ -25,6 +26,7 @@ class AndroidToolButtonTests(unittest.TestCase):
             patch.object(app, "is_android_runtime", return_value=True),
             patch.object(fluent_ui, "is_android_runtime", return_value=True),
             patch.object(app.StreamKeyGeneratorWindow, "ensure_device_identifiers", return_value=False),
+            patch.object(app, "fetch_game_tags", return_value={}),
         )
         for p in patches:
             p.start()
@@ -44,6 +46,15 @@ class AndroidToolButtonTests(unittest.TestCase):
             child for child in self.window.findChildren(fluent_ui.AccentMessageBox)
             if child.isVisible()).accept())
         self.window.show_info("Android test message")
+
+    def test_android_login_import_opens_picker_after_dialog_closes(self):
+        with patch.object(app.LoginDialog, "load_qr_code"):
+            dialog = app.LoginDialog(self.window)
+        with patch.object(self.window, "browse_cookies_file") as browse:
+            dialog.import_android_cookies()
+            browse.assert_not_called()
+            QTest.qWait(40)
+            browse.assert_called_once()
 
     def test_file_buttons_cancel_without_mutating_paths(self):
         original = self.window.get_cookies_path()
