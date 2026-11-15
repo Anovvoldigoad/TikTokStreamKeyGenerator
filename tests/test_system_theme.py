@@ -204,13 +204,18 @@ class ThemeTests(unittest.TestCase):
                     colors = Counter(rendered.pixelColor(x, y).name()
                                      for x in range(20, rendered.width() - 20)
                                      for y in range(8, rendered.height() - 8))
-                    (background, _), (foreground, text_pixels) = colors.most_common(2)
+                    background, _ = colors.most_common(1)[0]
                     self.assertEqual(background, ui.themeColor().name())
-                    # Qt 6.12 offscreen antialiasing may render four
-                    # solid foreground pixels for this short button label.
-                    self.assertGreaterEqual(text_pixels, 4)
-                    values = sorted((luminance(QColor(background)), luminance(QColor(foreground))))
-                    self.assertGreaterEqual((values[1] + .05) / (values[0] + .05), 4.5)
+                    # The second-most-common pixel is not necessarily text:
+                    # Qt's offscreen engine may put anti-aliased edge colors
+                    # between the button background and its actual lettering.
+                    def contrast(pixel):
+                        values = sorted((luminance(QColor(background)), luminance(QColor(pixel))))
+                        return (values[1] + .05) / (values[0] + .05)
+                    visible_text_pixels = sum(count for color, count in colors.items()
+                                              if contrast(color) >= 4.5)
+                    self.assertGreaterEqual(visible_text_pixels, 4)
+                    self.assertGreaterEqual(contrast(ui.accent_foreground(ui.themeColor()).name()), 4.5)
         self.assertTrue(dialog.testOption(ui.AccentMessageBox.Option.DontUseNativeDialog))
 
     def test_update_prompt_is_themed_and_download_requires_yes(self):
