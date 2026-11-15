@@ -49,6 +49,10 @@ class AndroidModalSurfaceTests(unittest.TestCase):
         self.assertFalse(progress.isWindow())
         self.assertIsNotNone(progress._android_sheet)
         self.assertTrue(progress._android_sheet.isVisible())
+        self.assertNotIn(
+            "Close", [button.text() for button in
+                      progress._android_sheet.findChildren(QPushButton)]
+        )
         progress.hide()
         self.assertIsNone(progress._android_sheet)
 

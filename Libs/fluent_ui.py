@@ -92,10 +92,13 @@ def _android_show_dialog(dialog):
     layout = QVBoxLayout(sheet)
     toolbar = QHBoxLayout()
     heading = QLabel(dialog.windowTitle() or 'Details', sheet)
-    close_button = PushButton('Close', sheet)
-    close_button.clicked.connect(dialog.reject)
     toolbar.addWidget(heading, 1)
-    toolbar.addWidget(close_button)
+    # BusyDialog.reject() intentionally does nothing without cancellation.
+    # Never present an inert Close control on the Android progress overlay.
+    if not dialog.property('android_disable_close'):
+        close_button = PushButton('Close', sheet)
+        close_button.clicked.connect(dialog.reject)
+        toolbar.addWidget(close_button)
     layout.addLayout(toolbar)
     scroll = QScrollArea(sheet)
     scroll.setFrameShape(QFrame.NoFrame)
