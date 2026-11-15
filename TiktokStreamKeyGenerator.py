@@ -7523,7 +7523,10 @@ class LoginDialog(QDialog):
         self.qr_label.setMinimumSize(260, 260)
         layout.addWidget(self.qr_label)
 
-        self.status_label = QLabel("Scan with the TikTok app.")
+        self.status_label = QLabel(
+            "Scan with TikTok on another device or import your own cookies JSON."
+            if is_android_runtime() else "Scan with the TikTok app."
+        )
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
@@ -7539,8 +7542,10 @@ class LoginDialog(QDialog):
         self.refresh_button.clicked.connect(self.load_qr_code)
         button_row.addWidget(self.refresh_button)
 
-        browser_button = QPushButton("Login in Browser")
-        browser_button.clicked.connect(self.open_browser_login)
+        browser_button = QPushButton("Import Cookies" if is_android_runtime() else "Login in Browser")
+        browser_button.clicked.connect(
+            self.import_android_cookies if is_android_runtime() else self.open_browser_login
+        )
         button_row.addWidget(browser_button)
 
         layout.addLayout(button_row)
@@ -7676,6 +7681,15 @@ class LoginDialog(QDialog):
             self.status_label.setText(f'QR login status: {status}')
         else:
             self.status_label.setText(payload.get('message') or payload.get('status_msg') or str(payload))
+
+    def import_android_cookies(self):
+        # Android does not have Windows' live-studio-app:// registry handler.
+        # Reuse the verified content-URI-safe cookie importer instead.
+        if not is_android_runtime():
+            return
+        self.cleanup()
+        self.accept()
+        self.parent_window.browse_cookies_file()
 
     def open_browser_login(self):
         self.cleanup()
