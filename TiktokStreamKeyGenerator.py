@@ -1263,6 +1263,19 @@ class Stream:
             prompt = streamInfo.get("data", {}).get("prompts") or streamInfo.get("prompts")
             if not prompt:
                 prompt = "Failed to create stream: " + json.dumps(streamInfo, ensure_ascii=False)[:1000]
+            from Libs.live_start_safety import end_new_room_if_allocated
+            try:
+                ended = end_new_room_if_allocated(
+                    self, previous_room_id=previous_room_id,
+                    device_id=device_id, install_id=install_id,
+                    priority_region=priority_region,
+                )
+            except Exception as cleanup_error:
+                raise RuntimeError(
+                    str(prompt) + " A newly created room may still be LIVE: cleanup failed."
+                ) from cleanup_error
+            if ended:
+                prompt = str(prompt) + " The incomplete LIVE room was ended."
             raise RuntimeError(prompt) from exc
 
     def getCreateRoomInfo(self, device_id="", install_id="", priority_region="", last_time_hashtag_id="5"):
@@ -3282,7 +3295,9 @@ class StreamKeyGeneratorWindow(AccentWindow):
         self._proxy_cleanup_threads = []
         self.device_id = ""
         self.install_id = ""
-        self.device_type = 'mobile' if is_android_runtime() else 'pc'
+        # Android packaging is not the TikTok *mobile API* identity. Default
+        # to the desktop-equivalent PC signing path; saved user mode still wins.
+        self.device_type = 'pc'
         self.devices = {'pc': {}, 'mobile': {'device_id': '', 'install_id': ''}}
         self._config_extra = {}
         self.current_room_id = ""
@@ -6713,12 +6728,11 @@ class StreamKeyGeneratorWindow(AccentWindow):
             with open(CONFIG_PATH, "r", encoding="utf-8") as file:
                 data = json.load(file)
         except FileNotFoundError:
-            if is_android_runtime():
-                self.device_type = 'mobile'
-                self.device_type_combo.blockSignals(True)
-                self.device_type_combo.setCurrentIndex(1)
-                self.device_type_combo.blockSignals(False)
-                self.update_device_mode_controls()
+            self.device_type = 'pc'
+            self.device_type_combo.blockSignals(True)
+            self.device_type_combo.setCurrentIndex(0)
+            self.device_type_combo.blockSignals(False)
+            self.update_device_mode_controls()
             self.device_id = ""
             self.install_id = ""
             self.cookie_file_path = _normalize_configured_path(DEFAULT_COOKIES_PATH)
@@ -7213,6 +7227,9 @@ class StreamKeyGeneratorWindow(AccentWindow):
 
                 dual_layout_requested = self.dual_layout_checkbox.isChecked()
 
+                # Track ownership; a proxy failure must not end an unrelated
+                # previously existing LIVE returned by the continue endpoint.
+                room_before_create = str(stream.roomId or "")
                 created = (yield Work(stream.createStream, self.title_edit.text(),
                     topic_id,
                     game_id,
@@ -7248,11 +7265,35 @@ class StreamKeyGeneratorWindow(AccentWindow):
                     return
 
                 if created:
-                    (yield from self.apply_stream_outputs(
-                        stream,
-                        priority_region=selected_region,
-                        dual_layout=dual_layout_requested,
-                    ))
+                    try:
+                        (yield from self.apply_stream_outputs(
+                            stream,
+                            priority_region=selected_region,
+                            dual_layout=dual_layout_requested,
+                        ))
+                    except Exception as proxy_error:
+                        from Libs.live_start_safety import end_new_room_if_allocated
+                        try:
+                            ended = (yield Work(
+                                end_new_room_if_allocated, stream,
+                                previous_room_id=room_before_create,
+                                device_id=self.device_id,
+                                install_id=self.install_id,
+                                priority_region=selected_region,
+                                label='Closing unusable LIVE room…',
+                            ))
+                        except Exception as cleanup_error:
+                            raise RuntimeError(
+                                "Local streaming could not start and TikTok may still have "
+                                "an active LIVE room. End it from TikTok before retrying. "
+                                f"Proxy error: {proxy_error}; cleanup error: {cleanup_error}"
+                            ) from cleanup_error
+                        if ended:
+                            raise RuntimeError(
+                                f"Local streaming could not start; the newly created LIVE "
+                                f"room was ended safely. Proxy error: {proxy_error}"
+                            ) from proxy_error
+                        raise
                     stream_started = True
                     self.anchor_ping_status = ANCHOR_STATUS_PREPARE
                     self.set_stream_state(is_live=True, is_paused=False)
