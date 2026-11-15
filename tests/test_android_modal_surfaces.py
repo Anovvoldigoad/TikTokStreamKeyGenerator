@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QApplication, QWidget, QPushButton
+from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QDialog, QMessageBox
 
 from Libs import fluent_ui
 
@@ -32,15 +32,25 @@ class AndroidModalSurfaceTests(unittest.TestCase):
     def test_dialog_accept_is_embedded_and_returns_accepted(self):
         dialog = fluent_ui.AccentDialog(self.host)
         QTimer.singleShot(0, dialog.accept)
-        self.assertEqual(dialog.exec(), dialog.Accepted)
+        self.assertEqual(dialog.exec(), QDialog.DialogCode.Accepted)
         self.assertFalse(dialog.isWindow())
 
     def test_messagebox_button_result_without_native_popup(self):
         message = fluent_ui.AccentMessageBox(self.host)
-        message.setStandardButtons(message.Yes | message.No)
-        QTimer.singleShot(0, lambda: message.button(message.Yes).click())
-        self.assertEqual(message.exec(), message.Yes)
+        message.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        QTimer.singleShot(0, lambda: message.button(QMessageBox.Yes).click())
+        self.assertEqual(message.exec(), QMessageBox.Yes)
         self.assertFalse(message.isWindow())
+
+    def test_background_progress_dialog_does_not_make_native_window(self):
+        from Libs.gui_tasks import BusyDialog
+        progress = BusyDialog(self.host, "Loading")
+        progress.show()
+        self.assertFalse(progress.isWindow())
+        self.assertIsNotNone(progress._android_sheet)
+        self.assertTrue(progress._android_sheet.isVisible())
+        progress.hide()
+        self.assertIsNone(progress._android_sheet)
 
     def test_combo_item_still_updates_selection(self):
         combo = fluent_ui.ComboBox(self.host)

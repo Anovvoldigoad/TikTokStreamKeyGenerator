@@ -73,16 +73,17 @@ class LineEdit(FluentLineEdit):
         self.setText(str(text))
 
 
-def _android_embedded_dialog_exec(dialog):
-    """Run a modal dialog as a child widget, without an Android EGL window.
+def _android_show_dialog(dialog):
+    """Display a Qt dialog inside the existing activity window.
 
-    Qt 6.12.0's Android backing store can abort when opening another
-    top-level Qt window. Keep dialog widgets on the already exposed main
-    activity surface, retaining QDialog accept/reject and result semantics.
+    This also handles nonblocking BusyDialog.show() paths used by workers.
     """
+    previous = getattr(dialog, '_android_sheet', None)
+    if previous is not None:
+        previous.show()
+        QtDialog.show(dialog)
+        return
     parent = dialog.parentWidget()
-    if parent is None:
-        return QtDialog.exec(dialog)
     host = parent.window()
     sheet = QWidget(host)
     sheet.setObjectName('androidModalSheet')
@@ -102,20 +103,38 @@ def _android_embedded_dialog_exec(dialog):
     layout.addWidget(scroll, 1)
     dialog.setWindowFlags(Qt.Widget)
     scroll.setWidget(dialog)
-    loop = QEventLoop(sheet)
+    dialog._android_sheet = sheet
+    dialog._android_scroll = scroll
+    sheet.show()
+    sheet.raise_()
+    QtDialog.show(dialog)
+
+
+def _android_hide_dialog(dialog):
+    sheet = getattr(dialog, '_android_sheet', None)
+    if sheet is None:
+        return
+    QtDialog.hide(dialog)
+    dialog._android_scroll.takeWidget()
+    dialog.setParent(sheet.parentWidget(), Qt.Widget)
+    dialog._android_sheet = None
+    dialog._android_scroll = None
+    sheet.hide()
+    sheet.deleteLater()
+
+
+def _android_embedded_dialog_exec(dialog):
+    """Preserve modal return values without opening an Android EGL window."""
+    if dialog.parentWidget() is None:
+        return QtDialog.exec(dialog)
+    _android_show_dialog(dialog)
+    loop = QEventLoop()
     dialog.finished.connect(loop.quit)
     try:
-        sheet.show()
-        sheet.raise_()
-        dialog.show()
         loop.exec()
         return dialog.result()
     finally:
-        dialog.hide()
-        scroll.takeWidget()
-        dialog.setParent(host, Qt.Widget)
-        sheet.hide()
-        sheet.deleteLater()
+        _android_hide_dialog(dialog)
 
 
 def _android_choose_action(menu):
@@ -150,12 +169,15 @@ def _android_choose_combo_item(combo):
     dialog = AccentDialog(combo.window())
     dialog.setWindowTitle('Select an option')
     layout = QVBoxLayout(dialog)
+    chosen = []
     for index, item in enumerate(combo.items):
         button = PushButton(item.text or '(None)', dialog)
         button.setEnabled(item.isEnabled)
-        button.clicked.connect(lambda checked=False, i=index: (combo._onItemClicked(i), dialog.accept()))
+        button.clicked.connect(lambda checked=False, i=index: (chosen.append(i), dialog.accept()))
         layout.addWidget(button)
     dialog.exec()
+    if chosen:
+        combo._onItemClicked(chosen[0])
     dialog.deleteLater()
 
 
@@ -396,6 +418,16 @@ class AccentWindow(_AccentSurface, QWidget):
 
 class AccentDialog(_AccentSurface, QtDialog):
     """Workspace dialog; on Android, avoid extra native EGL windows."""
+
+    def show(self):
+        if is_android_runtime() and self.parentWidget() is not None:
+            return _android_show_dialog(self)
+        return super().show()
+
+    def hide(self):
+        if is_android_runtime() and getattr(self, '_android_sheet', None) is not None:
+            return _android_hide_dialog(self)
+        return super().hide()
 
     def exec(self):
         if is_android_runtime():
