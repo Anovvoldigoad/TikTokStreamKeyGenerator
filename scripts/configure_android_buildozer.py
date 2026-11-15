@@ -8,7 +8,8 @@ from pathlib import Path
 import sys
 
 REQUIREMENTS = (
-    "python3,shiboken6,PySide6,requests,websockets,"
+    "python3,shiboken6,PySide6,requests,urllib3,idna,certifi,"
+    "charset-normalizer,websockets==15.0.1,"
     "PySide6-Fluent-Widgets,PySideSix-Frameless-Window,darkdetect,"
     "pytz,python-dotenv,packaging,tzdata,pycryptodome,segno"
 )

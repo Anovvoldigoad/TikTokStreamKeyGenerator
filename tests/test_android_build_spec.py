@@ -23,6 +23,15 @@ class AndroidBuildSpecTests(unittest.TestCase):
         self.assertLess(target.index("android.add_libs_arm64_v8a"), target.index("[buildozer]"))
         self.assertLess(target.index("android.permissions = INTERNET"), target.index("[buildozer]"))
 
+    def test_requests_runtime_dependencies_are_packaged_explicitly(self):
+        # python-for-android uses pip --no-deps for pure-Python packages.
+        # A successful APK build must not omit these import-time modules.
+        names = set(REQUIREMENTS.split(","))
+        for name in ("requests", "urllib3", "idna", "certifi", "charset-normalizer"):
+            with self.subTest(package=name):
+                self.assertIn(name, names)
+        self.assertIn("websockets==15.0.1", names)
+
     def test_adds_network_permission_without_discarding_qt_permissions(self):
         source = (
             "[app]\nrequirements = python3\nsource.include_exts = py\n"

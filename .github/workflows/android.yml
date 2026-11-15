@@ -123,6 +123,14 @@ jobs:
           # Qt's deploy launcher deletes buildozer.spec on every invocation.
           # Build directly after --init so the tested app dependency edits survive.
           python -m buildozer android debug
+          # p4a installs pure-Python requirements with --no-deps. Without
+          # explicit requests dependencies, this APK can crash at import time.
+          BUNDLE_DIR="$(find .buildozer/android/platform -type d -path '*/_python_bundle/site-packages' -print -quit)"
+          test -n "$BUNDLE_DIR" && test -d "$BUNDLE_DIR"
+          for package in requests urllib3 idna certifi charset_normalizer websockets; do
+            test -d "$BUNDLE_DIR/$package" || { echo "Missing Android Python dependency: $package" >&2; exit 1; }
+          done
+          test -f "$BUNDLE_DIR/certifi/cacert.pem"
           find . -name '*.apk' -type f -print
           APK="$(find . -name '*.apk' -type f | head -1)"
           test -n "$APK" && test -s "$APK"
