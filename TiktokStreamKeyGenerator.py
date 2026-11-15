@@ -3427,8 +3427,12 @@ class StreamKeyGeneratorWindow(AccentWindow):
         if has_startup_cookies:
             self.schedule_account_refresh(900)
         single_shot(self, 0, self.load_game_tags)
-        single_shot(self, 3000, self.show_donation_reminder)
-        single_shot(self, 6000, self.check_updates_on_startup)
+        if not is_android_runtime():
+            # The Android 16 crash dump entered QDialog::exec() from a startup
+            # timer and aborted in Qt's OpenGL backing-store initialization.
+            # Do not open unsolicited modal windows during mobile startup.
+            single_shot(self, 3000, self.show_donation_reminder)
+            single_shot(self, 6000, self.check_updates_on_startup)
 
 
     def _build_ui(self):
