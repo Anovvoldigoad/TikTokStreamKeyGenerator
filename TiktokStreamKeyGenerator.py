@@ -6864,7 +6864,10 @@ class StreamKeyGeneratorWindow(AccentWindow):
             QDesktopServices.openUrl(QUrl(update_info["url"]))
 
     def start_login(self):
-        if not self.ensure_device_identifiers(show_popup=True):
+        # Importing an existing cookie export does not require newly issued
+        # TikTok device IDs. Android users must be able to reach that tool
+        # even when device-registration endpoints are unavailable.
+        if not is_android_runtime() and not self.ensure_device_identifiers(show_popup=True):
             return
 
         dialog = LoginDialog(self)
@@ -7578,7 +7581,15 @@ class LoginDialog(QDialog):
         button_row.addWidget(browser_button)
 
         layout.addLayout(button_row)
-        self.load_qr_code()
+        if self.parent_window.has_device_identifiers():
+            self.load_qr_code()
+        else:
+            self.qr_label.setText('Device IDs are not ready')
+            self.status_label.setText(
+                'Import your cookies JSON to sign in. QR login requires '
+                'registered PC device IDs.'
+            )
+            self.refresh_button.setEnabled(False)
 
     def closeEvent(self, event):
         self.cleanup()
@@ -7620,6 +7631,10 @@ class LoginDialog(QDialog):
 
     def load_qr_code(self):
         if self._qr_busy:
+            return
+        if not self.parent_window.has_device_identifiers():
+            self.qr_label.setText('Device IDs are not ready')
+            self.status_label.setText('Import your cookies JSON or finish PC device setup.')
             return
         self.cleanup()
         self._qr_cancel = threading.Event()

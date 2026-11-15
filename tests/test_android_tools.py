@@ -56,6 +56,25 @@ class AndroidToolButtonTests(unittest.TestCase):
             QTest.qWait(40)
             browse.assert_called_once()
 
+    def test_login_import_is_available_without_device_registration(self):
+        # The import tool must not depend on network registration success.
+        with patch.object(app.LoginDialog, "exec",
+                          return_value=QDialog.DialogCode.Rejected) as dialog:
+            with patch.object(self.window, "ensure_device_identifiers") as register:
+                self.window.start_login()
+            dialog.assert_called_once()
+            register.assert_not_called()
+
+    def test_qr_login_does_not_start_without_device_ids(self):
+        with patch.object(app.LoginDialog, "load_qr_code") as qr:
+            dialog = app.LoginDialog(self.window)
+            try:
+                qr.assert_not_called()
+                self.assertFalse(dialog.refresh_button.isEnabled())
+                self.assertIn("Import", dialog.status_label.text())
+            finally:
+                dialog.close()
+
     def test_file_buttons_cancel_without_mutating_paths(self):
         original = self.window.get_cookies_path()
         with patch.object(app.QFileDialog, "getOpenFileName", return_value=("", "")) as picker:
