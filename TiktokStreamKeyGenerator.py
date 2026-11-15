@@ -542,11 +542,14 @@ class Stream:
         self.streamId = ""
         self._cached_live_studio_version = None
         self.cookies_path = _normalize_configured_path(cookies_path or _configured_cookies_path())
-        with open(self.cookies_path, "r", encoding="utf-8") as file:
+        with open(self.cookies_path, "r", encoding="utf-8-sig") as file:
             cookies_file = json.load(file)
 
+        # The GUI can import wrapped browser exports; request sessions must
+        # load the exact same normalized cookie objects (not dict keys).
+        from Libs.cookie_payload import normalize_cookie_entries
         cookies = {}
-        for cookie in cookies_file:
+        for cookie in normalize_cookie_entries(cookies_file):
             cookies[cookie["name"]] = cookie["value"]
         self.s.cookies.update(cookies)
         self._region_context_key = session_key(self.cookies_path, self.client.kind, self._cookie_value)
@@ -5538,53 +5541,8 @@ class StreamKeyGeneratorWindow(AccentWindow):
         QMessageBox.information(self, 'Device setup details', details)
 
     def normalize_cookie_payload(self, payload):
-        if isinstance(payload, dict):
-            if isinstance(payload.get("cookies"), list):
-                payload = payload["cookies"]
-            elif isinstance(payload.get("Cookie"), list):
-                payload = payload["Cookie"]
-            elif "name" in payload and "value" in payload:
-                payload = [payload]
-            else:
-                raise RuntimeError("JSON file does not look like a cookies export.")
-
-        if not isinstance(payload, list):
-            raise RuntimeError("Cookies JSON must be a list of cookie objects.")
-
-        cookies = []
-        for index, cookie in enumerate(payload, 1):
-            if not isinstance(cookie, dict):
-                raise RuntimeError(f"Cookie entry #{index} is not an object.")
-
-            name = cookie.get("name")
-            value = cookie.get("value")
-            if name in (None, "") or value is None:
-                continue
-
-            entry = dict(cookie)
-            entry["name"] = str(name)
-            entry["value"] = str(value)
-
-            if "expires" not in entry:
-                for key in ("expirationDate", "expiry", "expiration_date"):
-                    if key in entry:
-                        try:
-                            entry["expires"] = int(float(entry[key]))
-                        except (TypeError, ValueError):
-                            pass
-                        break
-
-            if "httpOnly" not in entry and "http_only" in entry:
-                entry["httpOnly"] = bool(entry.get("http_only"))
-            if "sameSite" not in entry and "same_site" in entry:
-                entry["sameSite"] = entry.get("same_site")
-
-            cookies.append(entry)
-
-        if not cookies:
-            raise RuntimeError("No usable cookies with name/value fields were found.")
-
-        return cookies
+        from Libs.cookie_payload import normalize_cookie_entries
+        return normalize_cookie_entries(payload)
 
     def load_cookie_entries_from_file(self, path):
         with open(path, "r", encoding="utf-8-sig") as file:
