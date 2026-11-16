@@ -1,14 +1,17 @@
-"""Small, non-Fluent Android UI for TikTok LIVE RTMP credentials."""
+"""Minimal Android UI for TikTok LIVE credentials, with no popup mode selector."""
+import base64
 import sys
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, QTimer, Signal, Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QLabel, QLineEdit,
-    QPushButton, QVBoxLayout, QWidget,
+    QApplication, QButtonGroup, QFileDialog, QLabel, QLineEdit,
+    QPushButton, QRadioButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from Libs.simple_android_stream import (
-    end_live, get_credentials, import_cookies, load_settings,
+    QrLoginSession, end_live, get_credentials, import_cookies,
+    import_cookies_text, load_settings,
 )
 
 
@@ -24,7 +27,7 @@ class RequestThread(QThread):
         try:
             self.result_ready.emit(self.action())
         except Exception as exc:
-            # Never log credentials or session cookies to public CI output.
+            # Account credentials never go to the debug console.
             self.error_ready.emit(str(exc))
 
 
@@ -32,40 +35,78 @@ class SimpleAndroidWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("TikTok RTMP & Stream Key")
-        self.setMinimumWidth(310)
+        self.setMinimumWidth(300)
         self.job = None
+        self.qr_session = None
         self.server_value = ""
         self.key_value = ""
         self.last_mode = None
 
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        outer = QVBoxLayout(self)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        outer.addWidget(scroll)
+        content = QWidget()
+        scroll.setWidget(content)
+        layout = QVBoxLayout(content)
+        layout.setSpacing(10)
+
         heading = QLabel("TikTok LIVE • RTMP & Stream Key")
         heading.setStyleSheet("font-size: 19px; font-weight: bold")
+        heading.setWordWrap(True)
         layout.addWidget(heading)
-        hint = QLabel("Hanya untuk akun yang punya akses LIVE. "
-                      "RapidAPI signer diperlukan. Login lewat cookies JSON akun sendiri.")
+        hint = QLabel("Pakai akun TikTok sendiri yang memiliki izin LIVE. "
+                      "Pengambilan key memerlukan layanan RapidAPI signer.")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        self.cookie_status = QLabel("Cookies belum diimpor")
+        self.cookie_status = QLabel("Belum login.")
         self.cookie_status.setWordWrap(True)
         layout.addWidget(self.cookie_status)
-        self.import_button = QPushButton("Impor Cookies TikTok (.json)")
-        self.import_button.clicked.connect(self.choose_cookies)
-        layout.addWidget(self.import_button)
-
-        layout.addWidget(QLabel("Sumber izin LIVE"))
-        self.client_mode = QComboBox()
-        self.client_mode.addItem("Android LIVE (eksperimental)", "mobile")
-        self.client_mode.addItem("PC LIVE Studio", "pc")
-        layout.addWidget(self.client_mode)
 
         layout.addWidget(QLabel("RapidAPI Signer Key"))
         self.api_key = QLineEdit()
         self.api_key.setPlaceholderText("Tempel RapidAPI key")
         self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
         layout.addWidget(self.api_key)
+
+        self.qr_button = QPushButton("Login TikTok lewat QR")
+        self.qr_button.clicked.connect(self.start_qr_login)
+        layout.addWidget(self.qr_button)
+        self.qr_label = QLabel()
+        self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.qr_label.setMinimumHeight(240)
+        self.qr_label.hide()
+        layout.addWidget(self.qr_label)
+        self.qr_help = QLabel("Scan QR dari aplikasi TikTok di perangkat lain. "
+                              "Kalau hanya punya satu HP, impor cookies JSON di bawah.")
+        self.qr_help.setWordWrap(True)
+        self.qr_help.hide()
+        layout.addWidget(self.qr_help)
+        self.cancel_qr_button = QPushButton("Batalkan login QR")
+        self.cancel_qr_button.clicked.connect(self.cancel_qr_login)
+        self.cancel_qr_button.hide()
+        layout.addWidget(self.cancel_qr_button)
+
+        self.import_button = QPushButton("Impor Cookies TikTok (.json)")
+        self.import_button.clicked.connect(self.choose_cookies)
+        layout.addWidget(self.import_button)
+        self.paste_button = QPushButton("Tempel Cookies JSON dari Clipboard")
+        self.paste_button.clicked.connect(self.paste_cookies)
+        layout.addWidget(self.paste_button)
+
+        layout.addWidget(QLabel("Sumber izin LIVE"))
+        # Avoid QComboBox's separate popup surface on Qt Android; it can trap
+        # input after selecting an item on certain Android 16 builds.
+        self.mobile_radio = QRadioButton("Android LIVE (eksperimental)")
+        self.pc_radio = QRadioButton("PC LIVE Studio")
+        self.mode_buttons = QButtonGroup(self)
+        self.mode_buttons.setExclusive(True)
+        self.mode_buttons.addButton(self.mobile_radio)
+        self.mode_buttons.addButton(self.pc_radio)
+        self.mobile_radio.setChecked(True)
+        layout.addWidget(self.mobile_radio)
+        layout.addWidget(self.pc_radio)
 
         layout.addWidget(QLabel("Judul LIVE"))
         self.title = QLineEdit("TikTok LIVE")
@@ -89,6 +130,7 @@ class SimpleAndroidWindow(QWidget):
         layout.addWidget(QLabel("Stream Key"))
         self.key = QLineEdit()
         self.key.setReadOnly(True)
+        self.key.setEchoMode(QLineEdit.EchoMode.Password)
         self.key.setPlaceholderText("Belum tersedia")
         layout.addWidget(self.key)
         self.copy_key = QPushButton("Salin Stream Key")
@@ -100,11 +142,9 @@ class SimpleAndroidWindow(QWidget):
         self.end_button.clicked.connect(self.finish_live)
         layout.addWidget(self.end_button)
 
-        warning = QLabel(
-            "PENTING: Ini kredensial asli yang diterima dari TikTok, "
-            "bukan alamat proxy. Generator sumber menyatakan koneksi "
-            "langsung OBS/encoder belum didukung dan bisa dibatasi TikTok."
-        )
+        warning = QLabel("Kredensial asli TikTok bukan alamat proxy. "
+                         "Pengiriman langsung dari OBS/encoder tidak dijamin "
+                         "berfungsi dan dapat dibatasi TikTok.")
         warning.setWordWrap(True)
         layout.addWidget(warning)
 
@@ -113,16 +153,25 @@ class SimpleAndroidWindow(QWidget):
         layout.addWidget(self.status)
         layout.addStretch()
 
+        self.qr_timer = QTimer(self)
+        self.qr_timer.setInterval(3000)
+        self.qr_timer.timeout.connect(self.poll_qr_login)
+
         settings = load_settings()
         if settings.get("cookies_path"):
-            self.cookie_status.setText("Cookies telah disimpan di penyimpanan privat aplikasi.")
+            self.cookie_status.setText("Cookies tersimpan di penyimpanan privat aplikasi.")
         if settings.get("rapidapi_key"):
             self.api_key.setText(settings["rapidapi_key"])
+
+    def selected_mode(self):
+        return "mobile" if self.mobile_radio.isChecked() else "pc"
 
     def choose_cookies(self):
         if self.job is not None:
             return
-        selected, _ = QFileDialog.getOpenFileName(self, "Pilih cookies TikTok", "", "JSON (*.json)")
+        selected, _ = QFileDialog.getOpenFileName(
+            self, "Pilih cookies TikTok", "", "JSON (*.json)"
+        )
         if not selected:
             return
         try:
@@ -130,12 +179,26 @@ class SimpleAndroidWindow(QWidget):
         except Exception as exc:
             self.status.setText("Gagal impor cookies: " + str(exc))
             return
-        self.cookie_status.setText("Cookies TikTok berhasil diimpor.")
-        self.status.setText("Cookies siap.")
+        self.cookie_status.setText("Login tersedia melalui cookies JSON.")
+        self.status.setText("Cookies siap dipakai.")
+
+    def paste_cookies(self):
+        if self.job is not None:
+            return
+        try:
+            import_cookies_text(QApplication.clipboard().text())
+        except Exception as exc:
+            self.status.setText("Gagal tempel cookies: " + str(exc))
+            return
+        self.cookie_status.setText("Login tersedia melalui cookies JSON.")
+        self.status.setText("Cookies disimpan secara privat.")
 
     def busy(self, value):
-        for button in (self.import_button, self.generate_button, self.end_button):
+        for button in (self.import_button, self.paste_button, self.qr_button,
+                       self.generate_button, self.end_button, self.cancel_qr_button):
             button.setEnabled(not value)
+        # Radio buttons remain interactive while requests run. The request
+        # already captures the selected mode on the GUI thread.
 
     def request(self, action, on_success, message):
         if self.job is not None:
@@ -145,20 +208,88 @@ class SimpleAndroidWindow(QWidget):
         job = RequestThread(action)
         self.job = job
         job.result_ready.connect(on_success)
-        job.error_ready.connect(lambda detail: self.status.setText("Gagal: " + detail))
+        job.error_ready.connect(self.show_request_error)
         job.finished.connect(self.job_finished)
+        job.finished.connect(job.deleteLater)
         job.start()
+
+    def show_request_error(self, message):
+        self.status.setText("Gagal: " + message)
 
     def job_finished(self):
         self.job = None
         self.busy(False)
 
+    def start_qr_login(self):
+        if self.job is not None:
+            return
+        self.cancel_qr_login()
+        api_key = self.api_key.text()
+        session = QrLoginSession()
+        self.request(lambda: (session, session.start(api_key)),
+                     self.show_qr, "Menyiapkan login QR TikTok…")
+
+    def show_qr(self, result):
+        session, encoded = result
+        image = QPixmap()
+        try:
+            valid = image.loadFromData(base64.b64decode(encoded))
+        except (ValueError, TypeError):
+            valid = False
+        if not valid:
+            session.close()
+            self.status.setText("Gagal: gambar QR dari TikTok tidak valid.")
+            return
+        self.qr_session = session
+        self.qr_label.setPixmap(image.scaled(235, 235, Qt.AspectRatioMode.KeepAspectRatio,
+                                             Qt.TransformationMode.SmoothTransformation))
+        self.qr_label.show()
+        self.qr_help.show()
+        self.cancel_qr_button.show()
+        self.qr_timer.start()
+        self.status.setText("Scan QR dan konfirmasi login dari aplikasi TikTok.")
+
+    def poll_qr_login(self):
+        if self.job is not None or self.qr_session is None:
+            return
+        session = self.qr_session
+        self.request(session.poll, self.handle_qr_status, "Memeriksa login TikTok…")
+
+    def handle_qr_status(self, status):
+        if status == "confirmed":
+            self.cookie_status.setText("Berhasil login TikTok. Cookies tersimpan privat.")
+            self.status.setText("Login berhasil. Sekarang ambil RTMP & Stream Key.")
+            self.cancel_qr_login(clear_status=False)
+        elif status == "scanned":
+            self.status.setText("QR dipindai. Konfirmasi login di aplikasi TikTok.")
+        elif status in ("expired", "timeout"):
+            self.cancel_qr_login(clear_status=False)
+            self.status.setText("QR sudah kedaluwarsa. Tekan Login TikTok lewat QR lagi.")
+        elif status == "new":
+            self.status.setText("Menunggu QR dipindai oleh TikTok.")
+        else:
+            self.status.setText("Status login TikTok: " + status)
+
+    def cancel_qr_login(self, clear_status=True):
+        # This is invoked only while no QR network worker is running.
+        if self.job is not None:
+            return
+        self.qr_timer.stop()
+        if self.qr_session is not None:
+            self.qr_session.close()
+            self.qr_session = None
+        self.qr_label.clear()
+        self.qr_label.hide()
+        self.qr_help.hide()
+        self.cancel_qr_button.hide()
+        if clear_status:
+            self.status.setText("Login QR dibatalkan.")
+
     def generate(self):
-        # Do not retain an old key if a new room request fails.
         self.clear_credentials()
         title = self.title.text()
         api_key = self.api_key.text()
-        mode = self.client_mode.currentData()
+        mode = self.selected_mode()
         self.request(lambda: get_credentials(title, api_key, mode),
                      self.show_credentials, "Menghubungi TikTok…")
 
@@ -171,15 +302,15 @@ class SimpleAndroidWindow(QWidget):
         self.copy_server.setEnabled(True)
         self.copy_key.setEnabled(True)
         self.status.setText(
-            ("Room LIVE lama digunakan kembali." if payload["resumed"]
-             else "Room LIVE baru dibuat.") + " Gunakan dengan hati-hati."
+            ("Room LIVE lama dipakai kembali." if payload["resumed"]
+             else "Room LIVE dibuat.") + " Kredensial berhasil diterima."
         )
 
     def finish_live(self):
         api_key = self.api_key.text()
-        mode = self.last_mode or self.client_mode.currentData()
-        self.request(lambda: end_live(api_key, mode), self.live_ended,
-                     "Mengakhiri room LIVE…")
+        mode = self.last_mode or self.selected_mode()
+        self.request(lambda: end_live(api_key, mode),
+                     self.live_ended, "Mengakhiri room LIVE…")
 
     def live_ended(self, ended):
         self.clear_credentials()
@@ -204,16 +335,16 @@ class SimpleAndroidWindow(QWidget):
             event.ignore()
             self.status.setText("Selesaikan permintaan sebelum menutup aplikasi.")
             return
+        self.cancel_qr_login(clear_status=False)
         super().closeEvent(event)
 
 
 def main():
-    # The existing backend imports Qt modules; load it on the UI thread,
-    # never from the network worker after a button has been tapped.
+    # Load original signer/room backend on the GUI thread, not in QThread.
     import TiktokStreamKeyGenerator  # noqa: F401
     app = QApplication.instance() or QApplication(sys.argv)
     window = SimpleAndroidWindow()
-    window.resize(400, 690)
+    window.resize(390, 680)
     window.show()
     return app.exec()
 
