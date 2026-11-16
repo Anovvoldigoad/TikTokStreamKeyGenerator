@@ -155,7 +155,7 @@ class SimpleAndroidCoreTests(unittest.TestCase):
         url = "https://www.tiktok.com/qr/login?next_url=https%3A%2F%2Fwww.tiktok.com"
         result = core.qr_png_from_response({"qrcode_index_url": url})
         data = base64.b64decode(result, validate=True)
-        self.assertTrue(data.startswith(b"\\x89PNG\\r\\n\\x1a\\n"))
+        self.assertTrue(data.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertGreater(len(data), 100)
 
         buffer = io.BytesIO()
@@ -163,7 +163,7 @@ class SimpleAndroidCoreTests(unittest.TestCase):
         fallback = core.qr_png_from_response({
             "qrcode": base64.b64encode(buffer.getvalue()).decode("ascii")
         })
-        self.assertTrue(base64.b64decode(fallback).startswith(b"\\x89PNG"))
+        self.assertTrue(base64.b64decode(fallback).startswith(b"\x89PNG"))
         with self.assertRaisesRegex(ValueError, "PNG"):
             core.qr_png_from_response({"qrcode": "cG5n"})
         with self.assertRaisesRegex(ValueError, "tidak valid"):
