@@ -75,6 +75,26 @@ class SimpleAndroidUiTests(unittest.TestCase):
         self.assertIsNone(self.window.qr_session)
         self.assertFalse(self.window.qr_complete)
 
+    def test_qr_poll_error_stops_retries_and_allows_cleanup(self):
+        class FakeSession:
+            def __init__(self):
+                self.closed = False
+            def close(self):
+                self.closed = True
+
+        session = FakeSession()
+        self.window.qr_session = session
+        self.window.qr_timer.start()
+        self.window.job = object()
+        self.window.handle_qr_poll_error("network unavailable")
+        self.assertFalse(self.window.qr_timer.isActive())
+        self.assertTrue(self.window.qr_complete)
+        self.assertFalse(session.closed)
+        self.window.job_finished()
+        self.assertTrue(session.closed)
+        self.assertIsNone(self.window.qr_session)
+        self.assertIn("Coba login QR lagi", self.window.status.text())
+
     def test_login_qr_button_uses_rapidapi_and_renders_image(self):
         from Libs.simple_android_stream import qr_png_from_response
         png = qr_png_from_response({
