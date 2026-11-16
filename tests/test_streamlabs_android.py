@@ -32,7 +32,7 @@ class StreamlabsAndroidTests(unittest.TestCase):
         self.assertTrue(params["code_challenge"][0])
         port = int(params["port"][0])
         self.assertFalse(login.ready())
-        with urlopen(f"http://127.0.0.1:{port}/?success=true&code=mock-one-time-code",
+        with urlopen(f"http://127.0.0.1:{port}/callback?success=true&code=mock-one-time-code",
                      timeout=3) as response:
             self.assertIn(b"diterima", response.read())
         self.assertTrue(login.ready())
@@ -69,6 +69,26 @@ class StreamlabsAndroidTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "tidak valid"):
             core.save_streamlabs_token("bad token")
         self.assertEqual(core.load_settings()["streamlabs_token"], "private-token")
+
+    def test_token_renewal_accepts_same_account_not_another(self):
+        core.save_settings({
+            "streamlabs_token": "expired-token",
+            "streamlabs_username": "sameaccount",
+            "streamlabs_active": {
+                "room_id": "r1", "server": "rtmp://test", "key": "secret"
+            }
+        })
+        with patch.object(module.StreamlabsClient, "info", return_value={
+            "can_be_live": True, "user": {"username": "sameaccount"}
+        }):
+            core.save_streamlabs_token("new-token")
+        self.assertEqual(core.load_settings()["streamlabs_token"], "new-token")
+        with patch.object(module.StreamlabsClient, "info", return_value={
+            "can_be_live": True, "user": {"username": "otheraccount"}
+        }):
+            with self.assertRaisesRegex(RuntimeError, "ganti akun"):
+                core.save_streamlabs_token("other-token")
+        self.assertEqual(core.load_settings()["streamlabs_token"], "new-token")
 
     def test_streamlabs_mode_needs_no_rapidapi_or_cookies_and_reuses_room(self):
         self.assertRaisesRegex(ValueError, "Login Streamlabs",
