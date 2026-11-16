@@ -201,7 +201,7 @@ class SimpleAndroidWindow(QWidget):
         # Radio buttons remain interactive while requests run. The request
         # already captures the selected mode on the GUI thread.
 
-    def request(self, action, on_success, message):
+    def request(self, action, on_success, message, on_error=None):
         if self.job is not None:
             return
         self.status.setText(message)
@@ -209,7 +209,7 @@ class SimpleAndroidWindow(QWidget):
         job = RequestThread(action)
         self.job = job
         job.result_ready.connect(on_success)
-        job.error_ready.connect(self.show_request_error)
+        job.error_ready.connect(on_error or self.show_request_error)
         job.finished.connect(self.job_finished)
         job.finished.connect(job.deleteLater)
         job.start()
@@ -265,7 +265,13 @@ class SimpleAndroidWindow(QWidget):
         if self.job is not None or self.qr_session is None:
             return
         session = self.qr_session
-        self.request(session.poll, self.handle_qr_status, "Memeriksa login TikTok…")
+        self.request(session.poll, self.handle_qr_status, "Memeriksa login TikTok…",
+                     on_error=self.handle_qr_poll_error)
+
+    def handle_qr_poll_error(self, message):
+        self.qr_timer.stop()
+        self.qr_complete = True
+        self.status.setText("Login QR gagal: " + message + ". Coba login QR lagi.")
 
     def handle_qr_status(self, status):
         if status == "confirmed":
