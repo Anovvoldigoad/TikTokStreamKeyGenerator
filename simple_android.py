@@ -235,6 +235,98 @@ class SimpleAndroidWindow(QWidget):
             "Mode ini memerlukan RapidAPI signer dan cookies TikTok."
         )
 
+    def begin_streamlabs_login(self):
+        if self.job is not None:
+            return
+        self.cancel_streamlabs_login(clear_status=False)
+        session = StreamlabsBrowserLogin()
+        try:
+            url = session.begin()
+        except Exception as exc:
+            self.status.setText("Tidak dapat membuka login Streamlabs: " + str(exc))
+            session.close()
+            return
+        self.streamlabs_login = session
+        self.streamlabs_login_url = url
+        self.streamlabs_copy_link_button.show()
+        self.streamlabs_cancel_button.show()
+        self.streamlabs_timer.start()
+        opened = QDesktopServices.openUrl(QUrl(url))
+        if opened:
+            self.status.setText(
+                "Login di browser, pilih TikTok dan izinkan Streamlabs. "
+                "Kembali ke aplikasi setelah selesai."
+            )
+        else:
+            self.status.setText(
+                "Browser tidak terbuka. Tekan 'Salin Link Login Streamlabs' "
+                "dan buka URL di browser Android."
+            )
+
+    def copy_streamlabs_login_url(self):
+        if self.streamlabs_login_url:
+            QApplication.clipboard().setText(self.streamlabs_login_url)
+            self.status.setText("Link login disalin. Buka di browser HP ini.")
+
+    def cancel_streamlabs_login(self, clear_status=True):
+        if self.job is not None:
+            return
+        self.streamlabs_timer.stop()
+        if self.streamlabs_login is not None:
+            self.streamlabs_login.close()
+            self.streamlabs_login = None
+        self.streamlabs_login_url = ""
+        self.streamlabs_copy_link_button.hide()
+        self.streamlabs_cancel_button.hide()
+        if clear_status:
+            self.status.setText("Login Streamlabs dibatalkan.")
+
+    def poll_streamlabs_login(self):
+        session = self.streamlabs_login
+        if session is None or self.job is not None:
+            return
+        if session.expired():
+            self.cancel_streamlabs_login(clear_status=False)
+            self.status.setText("Login Streamlabs kedaluwarsa. Mulai login lagi.")
+            return
+        if session.ready():
+            self.streamlabs_timer.stop()
+            self.request(
+                lambda: save_streamlabs_token(session.exchange()),
+                self.streamlabs_logged_in,
+                "Memeriksa izin TikTok LIVE melalui Streamlabs…",
+                on_error=self.streamlabs_login_error,
+            )
+
+    def paste_streamlabs_token(self):
+        if self.job is not None:
+            return
+        token = QApplication.clipboard().text().strip()
+        self.request(
+            lambda: save_streamlabs_token(token),
+            self.streamlabs_logged_in,
+            "Memvalidasi token Streamlabs…",
+        )
+
+    def streamlabs_logged_in(self, info):
+        username = info.get("username") or "akun TikTok"
+        allowed = bool(info.get("can_be_live"))
+        self.streamlabs_status.setText(
+            ("Siap LIVE melalui Streamlabs: " if allowed else
+             "Login berhasil; izin LIVE belum tersedia: ") + username
+        )
+        self.status.setText(
+            "Login Streamlabs berhasil. Kamu bisa ambil RTMP & Stream Key."
+            if allowed else
+            "Login berhasil, tetapi TikTok belum mengizinkan LIVE melalui Streamlabs."
+        )
+        if self.streamlabs_login is not None:
+            self.streamlabs_complete = True
+
+    def streamlabs_login_error(self, message):
+        self.status.setText("Login Streamlabs gagal: " + message)
+        self.streamlabs_complete = True
+
     def choose_cookies(self):
         if self.job is not None:
             return
