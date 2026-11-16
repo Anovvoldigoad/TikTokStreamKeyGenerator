@@ -91,12 +91,90 @@ def _device_profile(settings, mode):
     return profile
 
 
+def save_streamlabs_token(token):
+    """Validate and retain only the user's own Streamlabs bearer token."""
+    from Libs.streamlabs_android import StreamlabsClient
+    value = str(token or "").strip()
+    if not value or len(value) > 4096 or any(c.isspace() for c in value):
+        raise ValueError("Token Streamlabs tidak valid.")
+    settings = load_settings()
+    if settings.get("streamlabs_active") and settings.get("streamlabs_token") != value:
+        raise RuntimeError("Akhiri room Streamlabs sebelum mengganti akun.")
+    client = StreamlabsClient(value)
+    try:
+        info = client.info()
+    finally:
+        client.close()
+    settings["streamlabs_token"] = value
+    save_settings(settings)
+    user = info.get("user") if isinstance(info.get("user"), dict) else {}
+    return {
+        "username": str(user.get("username") or ""),
+        "can_be_live": info.get("can_be_live") is True,
+    }
+
+
+def streamlabs_credentials(title):
+    """Start only a single Streamlabs room or reuse existing private output."""
+    from Libs.streamlabs_android import StreamlabsClient
+    settings = load_settings()
+    token = str(settings.get("streamlabs_token") or "")
+    if not token:
+        raise ValueError("Login Streamlabs lewat browser atau tempel token dahulu.")
+    active = settings.get("streamlabs_active") or {}
+    if all(active.get(key) for key in ("room_id", "server", "key")):
+        return {
+            "server": active["server"], "key": active["key"],
+            "room_id": active["room_id"], "mode": "streamlabs", "resumed": True,
+        }
+    if active:
+        raise RuntimeError("Room Streamlabs sebelumnya tidak lengkap. Akhiri room dahulu.")
+    client = StreamlabsClient(token)
+    try:
+        info = client.info()
+        if info.get("can_be_live") is not True:
+            status = info.get("application_status")
+            status = status.get("status") if isinstance(status, dict) else ""
+            raise RuntimeError(
+                "Akun belum memiliki izin TikTok LIVE melalui Streamlabs. "
+                + (f"Status: {status}." if status else "Periksa akses Streamlabs TikTok LIVE.")
+            )
+        result = client.start(title, category="")
+    finally:
+        client.close()
+    settings["streamlabs_active"] = result
+    save_settings(settings)
+    return {
+        "server": result["server"], "key": result["key"],
+        "room_id": result["room_id"], "mode": "streamlabs", "resumed": False,
+    }
+
+
+def end_streamlabs_live():
+    from Libs.streamlabs_android import StreamlabsClient
+    settings = load_settings()
+    active = settings.get("streamlabs_active") or {}
+    if not active:
+        return False
+    token = settings.get("streamlabs_token") or ""
+    client = StreamlabsClient(token)
+    try:
+        client.end(active.get("room_id"))
+    finally:
+        client.close()
+    settings.pop("streamlabs_active", None)
+    save_settings(settings)
+    return True
+
+
 def get_credentials(title, api_key, mode="pc"):
     title = str(title or "").strip()
     if not title:
         raise ValueError("Judul LIVE tidak boleh kosong.")
     if len(title) > 32:
         raise ValueError("Judul LIVE maksimal 32 karakter.")
+    if mode == "streamlabs":
+        return streamlabs_credentials(title)
     settings, cookies_path = _ready_settings(api_key)
     profile = _device_profile(settings, mode)
 
@@ -138,6 +216,8 @@ def get_credentials(title, api_key, mode="pc"):
 
 
 def end_live(api_key, mode="pc"):
+    if mode == "streamlabs":
+        return end_streamlabs_live()
     settings, cookies_path = _ready_settings(api_key)
     profile = _device_profile(settings, mode)
     from TiktokStreamKeyGenerator import Stream
