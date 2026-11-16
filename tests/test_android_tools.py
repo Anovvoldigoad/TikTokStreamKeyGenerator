@@ -114,6 +114,38 @@ class AndroidToolButtonTests(unittest.TestCase):
         self.assertEqual(picker.call_count, 2)
         self.assertEqual(self.window.get_cookies_path(), original)
 
+    def test_native_pickers_release_and_restore_embedded_settings(self):
+        self.window.settings_dialog.show()
+        self.assertTrue(self.window.settings_dialog.isVisible())
+        self.assertIsNotNone(self.window.settings_dialog._android_sheet)
+        transitions = []
+
+        def cancel_picker(*_args):
+            transitions.append((
+                self.window.settings_dialog.isVisible(),
+                self.window.settings_dialog._android_sheet is None,
+            ))
+            return ("", "")
+
+        with patch.object(app.QFileDialog, "getOpenFileName",
+                          side_effect=cancel_picker) as picker:
+            self.window.browse_cookies_file()
+            self.window.browse_image()
+        self.assertEqual(picker.call_count, 2)
+        self.assertEqual(transitions, [(False, True), (False, True)])
+        self.assertTrue(self.window.settings_dialog.isVisible())
+        self.assertIsNotNone(self.window.settings_dialog._android_sheet)
+        self.window.settings_dialog.hide()
+
+    def test_picker_restores_settings_after_native_error(self):
+        self.window.settings_dialog.show()
+        with patch.object(app.QFileDialog, "getOpenFileName",
+                          side_effect=RuntimeError("Picker failed")):
+            with self.assertRaisesRegex(RuntimeError, "Picker failed"):
+                self.window._choose_file("Select", "", "All files (*.*)")
+        self.assertTrue(self.window.settings_dialog.isVisible())
+        self.window.settings_dialog.hide()
+
     def test_device_settings_button_handles_cancel(self):
         with patch.object(app.DeviceSettingsDialog, "exec",
                           return_value=QDialog.DialogCode.Rejected):

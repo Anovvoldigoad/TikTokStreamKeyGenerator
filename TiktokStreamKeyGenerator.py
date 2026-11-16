@@ -4630,9 +4630,23 @@ class StreamKeyGeneratorWindow(AccentWindow):
         self.game_label.setVisible(is_gaming)
         self.game_combo.setVisible(is_gaming)
 
+    def _choose_file(self, title, directory, filter_text):
+        # Android's document picker switches into a native activity. Detach
+        # the embedded settings sheet before opening it so Qt does not leave
+        # an active modal widget surface across the activity transition.
+        settings = getattr(self, "settings_dialog", None)
+        restore_settings = (is_android_runtime() and settings is not None
+                            and settings.isVisible())
+        if restore_settings:
+            settings.hide()
+        try:
+            return QFileDialog.getOpenFileName(self, title, directory, filter_text)
+        finally:
+            if restore_settings and not getattr(self, "_closing", False):
+                settings.show()
+
     def browse_image(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
+        file_path, _ = self._choose_file(
             "Select an Image",
             "",
             "Images (*.png *.jpg *.jpeg);;All files (*.*)",
@@ -5628,8 +5642,7 @@ class StreamKeyGeneratorWindow(AccentWindow):
         start_dir = os.path.dirname(self.get_cookies_path())
         if not os.path.isdir(start_dir):
             start_dir = ""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
+        file_path, _ = self._choose_file(
             "Select Cookies JSON",
             start_dir,
             "JSON files (*.json);;All files (*.*)",
