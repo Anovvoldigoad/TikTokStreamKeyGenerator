@@ -2,8 +2,8 @@
 import base64
 import sys
 
-from PySide6.QtCore import QThread, QTimer, Signal, Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QThread, QTimer, Signal, Qt, QUrl
+from PySide6.QtGui import QPixmap, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QFileDialog, QLabel, QLineEdit,
     QPushButton, QRadioButton, QScrollArea, QVBoxLayout, QWidget,
@@ -11,8 +11,9 @@ from PySide6.QtWidgets import (
 
 from Libs.simple_android_stream import (
     QrLoginSession, end_live, get_credentials, import_cookies,
-    import_cookies_text, load_settings,
+    import_cookies_text, load_settings, save_streamlabs_token,
 )
+from Libs.streamlabs_android import StreamlabsBrowserLogin
 
 
 class RequestThread(QThread):
@@ -39,6 +40,9 @@ class SimpleAndroidWindow(QWidget):
         self.job = None
         self.qr_session = None
         self.qr_complete = False
+        self.streamlabs_login = None
+        self.streamlabs_login_url = ""
+        self.streamlabs_complete = False
         self.server_value = ""
         self.key_value = ""
         self.last_mode = None
@@ -56,16 +60,40 @@ class SimpleAndroidWindow(QWidget):
         heading.setStyleSheet("font-size: 19px; font-weight: bold")
         heading.setWordWrap(True)
         layout.addWidget(heading)
-        hint = QLabel("Pakai akun TikTok sendiri yang memiliki izin LIVE. "
-                      "Pengambilan key memerlukan layanan RapidAPI signer.")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
+        self.hint = QLabel(
+            "Mode Streamlabs tidak memakai RapidAPI. Akun harus memiliki izin "
+            "TikTok LIVE melalui Streamlabs."
+        )
+        self.hint.setWordWrap(True)
+        layout.addWidget(self.hint)
 
-        self.cookie_status = QLabel("Belum login.")
+        self.streamlabs_status = QLabel("Streamlabs belum login.")
+        self.streamlabs_status.setWordWrap(True)
+        layout.addWidget(self.streamlabs_status)
+
+        self.streamlabs_browser_button = QPushButton("Login Streamlabs lewat Browser")
+        self.streamlabs_browser_button.clicked.connect(self.begin_streamlabs_login)
+        layout.addWidget(self.streamlabs_browser_button)
+        self.streamlabs_copy_link_button = QPushButton("Salin Link Login Streamlabs")
+        self.streamlabs_copy_link_button.clicked.connect(self.copy_streamlabs_login_url)
+        self.streamlabs_copy_link_button.hide()
+        layout.addWidget(self.streamlabs_copy_link_button)
+        self.streamlabs_cancel_button = QPushButton("Batalkan Login Streamlabs")
+        self.streamlabs_cancel_button.clicked.connect(self.cancel_streamlabs_login)
+        self.streamlabs_cancel_button.hide()
+        layout.addWidget(self.streamlabs_cancel_button)
+        self.streamlabs_paste_token_button = QPushButton(
+            "Tempel Token Streamlabs dari Clipboard"
+        )
+        self.streamlabs_paste_token_button.clicked.connect(self.paste_streamlabs_token)
+        layout.addWidget(self.streamlabs_paste_token_button)
+
+        self.cookie_status = QLabel("Belum login TikTok.")
         self.cookie_status.setWordWrap(True)
         layout.addWidget(self.cookie_status)
 
-        layout.addWidget(QLabel("RapidAPI Signer Key"))
+        self.api_label = QLabel("RapidAPI Signer Key")
+        layout.addWidget(self.api_label)
         self.api_key = QLineEdit()
         self.api_key.setPlaceholderText("Tempel RapidAPI key")
         self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
@@ -99,15 +127,20 @@ class SimpleAndroidWindow(QWidget):
         layout.addWidget(QLabel("Sumber izin LIVE"))
         # Avoid QComboBox's separate popup surface on Qt Android; it can trap
         # input after selecting an item on certain Android 16 builds.
-        self.mobile_radio = QRadioButton("Android LIVE (eksperimental)")
-        self.pc_radio = QRadioButton("PC LIVE Studio")
+        self.streamlabs_radio = QRadioButton("Streamlabs (tanpa RapidAPI)")
+        self.mobile_radio = QRadioButton("Android LIVE (perlu RapidAPI)")
+        self.pc_radio = QRadioButton("PC LIVE Studio (perlu RapidAPI)")
         self.mode_buttons = QButtonGroup(self)
         self.mode_buttons.setExclusive(True)
+        self.mode_buttons.addButton(self.streamlabs_radio)
         self.mode_buttons.addButton(self.mobile_radio)
         self.mode_buttons.addButton(self.pc_radio)
-        self.mobile_radio.setChecked(True)
+        self.streamlabs_radio.setChecked(True)
+        layout.addWidget(self.streamlabs_radio)
         layout.addWidget(self.mobile_radio)
         layout.addWidget(self.pc_radio)
+        for button in (self.streamlabs_radio, self.mobile_radio, self.pc_radio):
+            button.toggled.connect(self.update_mode_visibility)
 
         layout.addWidget(QLabel("Judul LIVE"))
         self.title = QLineEdit("TikTok LIVE")
@@ -143,11 +176,13 @@ class SimpleAndroidWindow(QWidget):
         self.end_button.clicked.connect(self.finish_live)
         layout.addWidget(self.end_button)
 
-        warning = QLabel("Kredensial asli TikTok bukan alamat proxy. "
-                         "Pengiriman langsung dari OBS/encoder tidak dijamin "
-                         "berfungsi dan dapat dibatasi TikTok.")
-        warning.setWordWrap(True)
-        layout.addWidget(warning)
+        self.warning = QLabel(
+            "Mode Android/PC asli mengembalikan key yang mungkin memerlukan "
+            "metadata dan proxy untuk streaming. Mode Streamlabs memakai "
+            "RTMP/key dari API Streamlabs bila akun diizinkan."
+        )
+        self.warning.setWordWrap(True)
+        layout.addWidget(self.warning)
 
         self.status = QLabel("Siap.")
         self.status.setWordWrap(True)
@@ -157,15 +192,48 @@ class SimpleAndroidWindow(QWidget):
         self.qr_timer = QTimer(self)
         self.qr_timer.setInterval(3000)
         self.qr_timer.timeout.connect(self.poll_qr_login)
+        self.streamlabs_timer = QTimer(self)
+        self.streamlabs_timer.setInterval(1000)
+        self.streamlabs_timer.timeout.connect(self.poll_streamlabs_login)
 
         settings = load_settings()
         if settings.get("cookies_path"):
             self.cookie_status.setText("Cookies tersimpan di penyimpanan privat aplikasi.")
         if settings.get("rapidapi_key"):
             self.api_key.setText(settings["rapidapi_key"])
+        if settings.get("streamlabs_token"):
+            self.streamlabs_status.setText("Token Streamlabs tersimpan privat.")
+        self.update_mode_visibility()
 
     def selected_mode(self):
+        if self.streamlabs_radio.isChecked():
+            return "streamlabs"
         return "mobile" if self.mobile_radio.isChecked() else "pc"
+
+    def update_mode_visibility(self):
+        streamlabs = self.selected_mode() == "streamlabs"
+        self.streamlabs_status.setVisible(streamlabs)
+        for widget in (self.streamlabs_browser_button, self.streamlabs_paste_token_button):
+            widget.setVisible(streamlabs)
+        self.streamlabs_copy_link_button.setVisible(streamlabs and bool(self.streamlabs_login))
+        self.streamlabs_cancel_button.setVisible(streamlabs and bool(self.streamlabs_login))
+        for widget in (self.cookie_status, self.api_label, self.api_key,
+                       self.qr_button, self.import_button, self.paste_button):
+            widget.setVisible(not streamlabs)
+        if streamlabs:
+            self.qr_label.hide()
+            self.qr_help.hide()
+            self.cancel_qr_button.hide()
+        elif self.qr_session is not None:
+            self.qr_label.show()
+            self.qr_help.show()
+            self.cancel_qr_button.show()
+        self.hint.setText(
+            "Login Streamlabs lewat browser, lalu ambil RTMP/key tanpa RapidAPI. "
+            "Akun perlu izin TikTok LIVE dari Streamlabs."
+            if streamlabs else
+            "Mode ini memerlukan RapidAPI signer dan cookies TikTok."
+        )
 
     def choose_cookies(self):
         if self.job is not None:
@@ -196,7 +264,9 @@ class SimpleAndroidWindow(QWidget):
 
     def busy(self, value):
         for button in (self.import_button, self.paste_button, self.qr_button,
-                       self.generate_button, self.end_button, self.cancel_qr_button):
+                       self.generate_button, self.end_button, self.cancel_qr_button,
+                       self.streamlabs_browser_button, self.streamlabs_paste_token_button,
+                       self.streamlabs_cancel_button, self.streamlabs_copy_link_button):
             button.setEnabled(not value)
         # Radio buttons remain interactive while requests run. The request
         # already captures the selected mode on the GUI thread.
@@ -223,6 +293,9 @@ class SimpleAndroidWindow(QWidget):
         if self.qr_complete:
             self.qr_complete = False
             self.cancel_qr_login(clear_status=False)
+        if self.streamlabs_complete:
+            self.streamlabs_complete = False
+            self.cancel_streamlabs_login(clear_status=False)
 
     def start_qr_login(self):
         if self.job is not None:
@@ -356,6 +429,7 @@ class SimpleAndroidWindow(QWidget):
             self.status.setText("Selesaikan permintaan sebelum menutup aplikasi.")
             return
         self.cancel_qr_login(clear_status=False)
+        self.cancel_streamlabs_login(clear_status=False)
         super().closeEvent(event)
 
 
