@@ -98,18 +98,22 @@ def save_streamlabs_token(token):
     if not value or len(value) > 4096 or any(c.isspace() for c in value):
         raise ValueError("Token Streamlabs tidak valid.")
     settings = load_settings()
-    if settings.get("streamlabs_active") and settings.get("streamlabs_token") != value:
-        raise RuntimeError("Akhiri room Streamlabs sebelum mengganti akun.")
     client = StreamlabsClient(value)
     try:
         info = client.info()
     finally:
         client.close()
-    settings["streamlabs_token"] = value
-    save_settings(settings)
     user = info.get("user") if isinstance(info.get("user"), dict) else {}
+    username = str(user.get("username") or "")
+    if settings.get("streamlabs_active") and settings.get("streamlabs_token") != value:
+        previous = str(settings.get("streamlabs_username") or "")
+        if not previous or not username or previous != username:
+            raise RuntimeError("Akhiri room Streamlabs sebelum mengganti akun.")
+    settings["streamlabs_token"] = value
+    settings["streamlabs_username"] = username
+    save_settings(settings)
     return {
-        "username": str(user.get("username") or ""),
+        "username": username,
         "can_be_live": info.get("can_be_live") is True,
     }
 
