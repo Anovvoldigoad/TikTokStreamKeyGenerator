@@ -4646,11 +4646,15 @@ class StreamKeyGeneratorWindow(AccentWindow):
                 settings.show()
 
     def browse_image(self):
-        file_path, _ = self._choose_file(
-            "Select an Image",
-            "",
-            "Images (*.png *.jpg *.jpeg);;All files (*.*)",
-        )
+        try:
+            file_path, _ = self._choose_file(
+                "Select an Image",
+                "",
+                "Images (*.png *.jpg *.jpeg);;All files (*.*)",
+            )
+        except (OSError, RuntimeError) as exc:
+            self.show_error(f"Could not open image picker: {exc}")
+            return
         if file_path:
             try:
                 if is_android_runtime():
@@ -5642,11 +5646,15 @@ class StreamKeyGeneratorWindow(AccentWindow):
         start_dir = os.path.dirname(self.get_cookies_path())
         if not os.path.isdir(start_dir):
             start_dir = ""
-        file_path, _ = self._choose_file(
-            "Select Cookies JSON",
-            start_dir,
-            "JSON files (*.json);;All files (*.*)",
-        )
+        try:
+            file_path, _ = self._choose_file(
+                "Select Cookies JSON",
+                start_dir,
+                "JSON files (*.json);;All files (*.*)",
+            )
+        except (OSError, RuntimeError) as exc:
+            self.show_error(f"Could not open cookies picker: {exc}")
+            return
         if not file_path:
             return
 

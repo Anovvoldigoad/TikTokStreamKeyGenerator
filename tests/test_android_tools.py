@@ -146,6 +146,20 @@ class AndroidToolButtonTests(unittest.TestCase):
         self.assertTrue(self.window.settings_dialog.isVisible())
         self.window.settings_dialog.hide()
 
+    def test_native_picker_failures_show_error_and_restore_settings(self):
+        self.window.settings_dialog.show()
+        with patch.object(app.QFileDialog, "getOpenFileName",
+                          side_effect=RuntimeError("Native picker unavailable")), \
+             patch.object(self.window, "show_error") as error:
+            self.window.browse_cookies_file()
+            self.window.browse_image()
+        self.assertEqual(error.call_count, 2)
+        self.assertIn("cookies picker", error.call_args_list[0].args[0])
+        self.assertIn("image picker", error.call_args_list[1].args[0])
+        self.assertTrue(self.window.settings_dialog.isVisible())
+        self.assertIsNotNone(self.window.settings_dialog._android_sheet)
+        self.window.settings_dialog.hide()
+
     def test_device_settings_button_handles_cancel(self):
         with patch.object(app.DeviceSettingsDialog, "exec",
                           return_value=QDialog.DialogCode.Rejected):
