@@ -251,7 +251,7 @@ class SimpleAndroidWindow(QWidget):
         self.streamlabs_copy_link_button.show()
         self.streamlabs_cancel_button.show()
         self.streamlabs_timer.start()
-        opened = QDesktopServices.openUrl(QUrl(url))
+        opened = self.open_streamlabs_browser(url)
         if opened:
             self.status.setText(
                 "Login di browser, pilih TikTok dan izinkan Streamlabs. "
@@ -262,6 +262,9 @@ class SimpleAndroidWindow(QWidget):
                 "Browser tidak terbuka. Tekan 'Salin Link Login Streamlabs' "
                 "dan buka URL di browser Android."
             )
+
+    def open_streamlabs_browser(self, url):
+        return QDesktopServices.openUrl(QUrl(url))
 
     def copy_streamlabs_login_url(self):
         if self.streamlabs_login_url:
