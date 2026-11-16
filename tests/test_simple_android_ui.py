@@ -21,7 +21,10 @@ class SimpleAndroidUiTests(unittest.TestCase):
 
     def test_mode_switch_has_no_native_popup_and_does_not_block_buttons(self):
         self.assertEqual(self.window.findChildren(QComboBox), [])
-        self.assertEqual(self.window.selected_mode(), "mobile")
+        self.assertEqual(self.window.selected_mode(), "streamlabs")
+        self.assertTrue(self.window.streamlabs_radio.isChecked())
+        self.assertTrue(self.window.api_key.isHidden())
+        self.assertFalse(self.window.streamlabs_browser_button.isHidden())
         self.window.pc_radio.click()
         self.assertEqual(self.window.selected_mode(), "pc")
         self.window.mobile_radio.click()
@@ -45,6 +48,74 @@ class SimpleAndroidUiTests(unittest.TestCase):
                    return_value={"server": "rtmp", "key": "key"}) as call:
             action()
         call.assert_called_once_with("TikTok LIVE", "api-key", "pc")
+
+    def test_streamlabs_generate_and_end_never_require_api_key(self):
+        self.assertEqual(self.window.selected_mode(), "streamlabs")
+        with patch.object(self.window, "request") as request:
+            self.window.generate()
+            action = request.call_args.args[0]
+        with patch("simple_android.get_credentials", return_value={}) as call:
+            action()
+        call.assert_called_once_with("TikTok LIVE", "", "streamlabs")
+        self.window.last_mode = "streamlabs"
+        self.window.pc_radio.click()
+        with patch.object(self.window, "request") as request:
+            self.window.finish_live()
+            action = request.call_args.args[0]
+        with patch("simple_android.end_live", return_value=True) as call:
+            action()
+        call.assert_called_once_with("", "streamlabs")
+
+    def test_streamlabs_browser_login_opens_url_and_polls_success(self):
+        class FakeSession:
+            def __init__(self):
+                self.closed = False
+                self.finished = False
+            def begin(self):
+                return "https://streamlabs.com/slobs/login?code_flow=true"
+            def ready(self):
+                return True
+            def expired(self):
+                return False
+            def exchange(self):
+                return "mock-token"
+            def close(self):
+                self.closed = True
+
+        session = FakeSession()
+        with patch("simple_android.StreamlabsBrowserLogin", return_value=session), \
+             patch("simple_android.QDesktopServices.openUrl", return_value=True) as opened:
+            self.window.streamlabs_browser_button.click()
+        self.assertTrue(self.window.streamlabs_timer.isActive())
+        opened.assert_called_once()
+        self.assertIs(self.window.streamlabs_login, session)
+        with patch.object(self.window, "request") as request:
+            self.window.poll_streamlabs_login()
+            action, success = request.call_args.args[:2]
+        with patch("simple_android.save_streamlabs_token", return_value={
+            "username": "testuser", "can_be_live": True
+        }) as save:
+            result = action()
+        save.assert_called_once_with("mock-token")
+        success(result)
+        self.assertIn("testuser", self.window.streamlabs_status.text())
+        self.window.job = object()
+        self.window.job_finished()
+        self.assertTrue(session.closed)
+        self.assertIsNone(self.window.streamlabs_login)
+
+    def test_streamlabs_token_paste_validates_before_success(self):
+        self.application.clipboard().setText("private-test-token")
+        with patch.object(self.window, "request") as request:
+            self.window.streamlabs_paste_token_button.click()
+            action, success = request.call_args.args[:2]
+        with patch("simple_android.save_streamlabs_token", return_value={
+            "username": "test", "can_be_live": False
+        }) as save:
+            result = action()
+        save.assert_called_once_with("private-test-token")
+        success(result)
+        self.assertIn("belum tersedia", self.window.streamlabs_status.text())
 
     def test_end_live_preserves_mode_of_created_room(self):
         self.window.api_key.setText("api-key")
