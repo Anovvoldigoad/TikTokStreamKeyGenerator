@@ -104,6 +104,14 @@ def get_credentials(title, api_key):
                 )
             resumed = True
         else:
+            # A LIVE status without a continuable URL must not be overwritten.
+            create_info = stream.getCreateRoomInfo(last_time_hashtag_id="42", **args)
+            create_data = create_info.get("data", {}) if isinstance(create_info, dict) else {}
+            if str(create_data.get("live_status")) == "2":
+                raise RuntimeError(
+                    "TikTok melaporkan LIVE aktif, tetapi tidak memberikan RTMP untuk dipakai. "
+                    "Akhiri LIVE lama dari TikTok terlebih dahulu."
+                )
             # "42" is the Chat & Interview topic; no game lookup is required.
             if not stream.createStream(title, "42", device_id=args["device_id"],
                                        install_id=args["install_id"]):
@@ -131,5 +139,6 @@ def end_live(api_key):
         room_id, stream_id = existing.get("room_id"), existing.get("stream_id")
         if not room_id or not stream_id:
             raise RuntimeError("TikTok tidak memberikan ID room yang bisa diakhiri.")
-        stream.endStream(room_id=room_id, stream_id=stream_id, **args)
+        stream.endStream(room_id=room_id, stream_id=stream_id,
+                         priority_region=existing.get("priority_region", ""), **args)
         return True
