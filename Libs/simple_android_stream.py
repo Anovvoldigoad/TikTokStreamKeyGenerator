@@ -71,29 +71,38 @@ def _ready_settings(api_key):
     return settings, cookies_path
 
 
-def _device_profile(settings):
-    from Libs.device_gen import register_desktop_device_identifiers
-    profile = (settings.get("devices") or {}).get("pc") or {}
+def _device_profile(settings, mode):
+    from Libs.device_gen import (
+        register_desktop_device_identifiers, register_mobile_device_identifiers,
+    )
+    from Libs.client_profiles import mobile_record_defaults
+    if mode not in ("pc", "mobile"):
+        raise ValueError("Mode TikTok tidak dikenal.")
+    profile = (settings.get("devices") or {}).get(mode) or {}
+    if mode == "mobile":
+        profile = mobile_record_defaults(profile)
     if profile.get("device_id") and profile.get("install_id"):
         return profile
-    profile = register_desktop_device_identifiers(device_profile=profile, return_profile=True)
-    settings.setdefault("devices", {})["pc"] = profile
+    register = (register_mobile_device_identifiers if mode == "mobile"
+                else register_desktop_device_identifiers)
+    profile = register(device_profile=profile, return_profile=True)
+    settings.setdefault("devices", {})[mode] = profile
     save_settings(settings)
     return profile
 
 
-def get_credentials(title, api_key):
+def get_credentials(title, api_key, mode="pc"):
     title = str(title or "").strip()
     if not title:
         raise ValueError("Judul LIVE tidak boleh kosong.")
     if len(title) > 32:
         raise ValueError("Judul LIVE maksimal 32 karakter.")
     settings, cookies_path = _ready_settings(api_key)
-    profile = _device_profile(settings)
+    profile = _device_profile(settings, mode)
 
     # Import the already audited LIVE request and signed-room implementation.
     from TiktokStreamKeyGenerator import Stream
-    with Stream(cookies_path=cookies_path, device_type="pc", device_profile=profile) as stream:
+    with Stream(cookies_path=cookies_path, device_type=mode, device_profile=profile) as stream:
         args = {"device_id": profile["device_id"], "install_id": profile["install_id"]}
         existing = stream.getContinuableStreamInfo(**args)
         if existing.get("has_room"):
@@ -127,9 +136,9 @@ def get_credentials(title, api_key):
         }
 
 
-def end_live(api_key):
+def end_live(api_key, mode="pc"):
     settings, cookies_path = _ready_settings(api_key)
-    profile = _device_profile(settings)
+    profile = _device_profile(settings, mode)
     from TiktokStreamKeyGenerator import Stream
     with Stream(cookies_path=cookies_path, device_type="pc", device_profile=profile) as stream:
         args = {"device_id": profile["device_id"], "install_id": profile["install_id"]}
