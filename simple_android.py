@@ -161,9 +161,9 @@ class SimpleAndroidWindow(QWidget):
         mode = self.client_mode.currentData()
         self.request(lambda: get_credentials(title, api_key, mode),
                      self.show_credentials, "Menghubungi TikTok…")
-        self.last_mode = mode
 
     def show_credentials(self, payload):
+        self.last_mode = payload["mode"]
         self.server_value = payload["server"]
         self.key_value = payload["key"]
         self.server.setText(self.server_value)
