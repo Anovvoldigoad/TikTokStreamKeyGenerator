@@ -42,7 +42,7 @@ def save_settings(settings):
 def validate_cookies(path):
     with open(path, encoding="utf-8-sig") as file:
         entries = normalize_cookie_entries(json.load(file))
-    names = {item["name"] for item in entries}
+    names = {item["name"] for item in entries if item["value"]}
     if not names.intersection({"sessionid", "sessionid_ss", "sid_tt"}):
         raise ValueError("File JSON tidak memiliki cookie sesi login TikTok.")
     return entries
@@ -141,7 +141,7 @@ def end_live(api_key, mode="pc"):
     settings, cookies_path = _ready_settings(api_key)
     profile = _device_profile(settings, mode)
     from TiktokStreamKeyGenerator import Stream
-    with Stream(cookies_path=cookies_path, device_type="pc", device_profile=profile) as stream:
+    with Stream(cookies_path=cookies_path, device_type=mode, device_profile=profile) as stream:
         args = {"device_id": profile["device_id"], "install_id": profile["install_id"]}
         existing = stream.getContinuableStreamInfo(**args)
         if not existing.get("has_room"):
@@ -152,3 +152,102 @@ def end_live(api_key, mode="pc"):
         stream.endStream(room_id=room_id, stream_id=stream_id,
                          priority_region=existing.get("priority_region", ""), **args)
         return True
+
+
+def import_cookies_text(text):
+    """Accept an existing browser JSON export without a Qt Android file picker."""
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Clipboard belum berisi cookies JSON TikTok.")
+    if len(text.encode("utf-8")) > 16 * 1024 * 1024:
+        raise ValueError("Cookies JSON terlalu besar (maksimal 16 MB).")
+    entries = normalize_cookie_entries(json.loads(text))
+    if not any(item["name"] in {"sessionid", "sessionid_ss", "sid_tt"}
+               and item["value"] for item in entries):
+        raise ValueError("Cookies JSON tidak mengandung sesi login TikTok.")
+    target = Path(user_data_dir()) / "selected-cookies.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".cookies-", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            json.dump(entries, output)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    settings = load_settings()
+    settings["cookies_path"] = str(target)
+    save_settings(settings)
+    return str(target)
+
+
+class QrLoginSession:
+    """Standalone TikTok Live Studio QR login using the existing signed client.
+
+    The UI drives start() and poll() on its network worker; no nested Qt dialog.
+    QR login is separate from Mobile LIVE entitlement.
+    """
+
+    def __init__(self):
+        self.client = None
+        self.token = ""
+
+    def start(self, api_key):
+        api_key = str(api_key or "").strip()
+        if not api_key:
+            raise ValueError("Isi RapidAPI Signer Key sebelum login QR.")
+        settings = load_settings()
+        settings["rapidapi_key"] = api_key
+        save_settings(settings)
+        profile = _device_profile(settings, "pc")
+        from TiktokStreamKeyGenerator import LiveStudioBrowserLoginClient
+        client = LiveStudioBrowserLoginClient(profile["device_id"], profile["install_id"])
+        try:
+            result = client.get_qrcode()
+            token = str(result.get("token") or "")
+            image = result.get("qrcode") or ""
+            if not token or not image:
+                raise RuntimeError("TikTok tidak mengembalikan gambar QR login.")
+        except Exception:
+            client.close()
+            raise
+        self.client = client
+        self.token = token
+        return image
+
+    def poll(self):
+        if self.client is None or not self.token:
+            raise RuntimeError("Mulai login QR terlebih dahulu.")
+        payload = self.client.check_qrconnect(self.token)
+        data = payload.get("data") if isinstance(payload, dict) else {}
+        data = data if isinstance(data, dict) else {}
+        status = str(data.get("status") or data.get("qr_status")
+                     or data.get("state") or "new")
+        if status == "confirmed":
+            expected = str(getattr(self.client, "qr_client_secret", "") or "")
+            returned = str(data.get("client_secret") or "")
+            if expected and not (returned == expected or data.get("client_secret_match")):
+                return "scanned"
+            target = Path(user_data_dir()) / "qr-cookies.json"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            fd, temporary = tempfile.mkstemp(prefix=".qr-cookies-", dir=target.parent)
+            os.close(fd)
+            try:
+                self.client.save_cookies(temporary)
+                validate_cookies(temporary)
+                os.replace(temporary, target)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+            settings = load_settings()
+            settings["cookies_path"] = str(target)
+            save_settings(settings)
+            return "confirmed"
+        return status
+
+    def close(self):
+        client, self.client = self.client, None
+        self.token = ""
+        if client is not None:
+            client.close()
