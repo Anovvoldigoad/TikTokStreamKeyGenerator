@@ -197,6 +197,9 @@ class SimpleAndroidWindow(QWidget):
 
 
 def main():
+    # The existing backend imports Qt modules; load it on the UI thread,
+    # never from the network worker after a button has been tapped.
+    import TiktokStreamKeyGenerator  # noqa: F401
     app = QApplication.instance() or QApplication(sys.argv)
     window = SimpleAndroidWindow()
     window.resize(400, 690)
