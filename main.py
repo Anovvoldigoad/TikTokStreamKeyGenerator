@@ -16,7 +16,7 @@ configure_android_background_events()
 # Set before any PySide6 imports to avoid forcing the crash-prone RHI path.
 configure_android_widget_rendering()
 
-from TiktokStreamKeyGenerator import main
+from simple_android import main
 
 
 if __name__ == "__main__":
