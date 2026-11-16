@@ -53,6 +53,48 @@ class AndroidModalSurfaceTests(unittest.TestCase):
         self.assertEqual(message.exec(), QMessageBox.Yes)
         self.assertFalse(message.isWindow())
 
+    def test_static_critical_uses_embedded_dialog(self):
+        seen = []
+
+        def choose():
+            dialog = next(child for child in self.host.findChildren(fluent_ui.AccentMessageBox)
+                          if child.isVisible())
+            seen.append(dialog.isWindow())
+            dialog.button(QMessageBox.Ok).click()
+
+        QTimer.singleShot(0, choose)
+        self.assertEqual(fluent_ui.AccentMessageBox.critical(self.host, "Error", "Test"), QMessageBox.Ok)
+        self.assertEqual(seen, [False])
+
+    def test_static_information_uses_embedded_dialog(self):
+        seen = []
+
+        def choose():
+            dialog = next(child for child in self.host.findChildren(fluent_ui.AccentMessageBox)
+                          if child.isVisible())
+            seen.append(dialog.isWindow())
+            dialog.button(QMessageBox.Ok).click()
+
+        QTimer.singleShot(0, choose)
+        self.assertEqual(fluent_ui.AccentMessageBox.information(self.host, "Info", "Test"), QMessageBox.Ok)
+        self.assertEqual(seen, [False])
+
+    def test_static_question_preserves_button_result(self):
+        seen = []
+
+        def choose():
+            dialog = next(child for child in self.host.findChildren(fluent_ui.AccentMessageBox)
+                          if child.isVisible())
+            seen.append(dialog.isWindow())
+            self.assertEqual(dialog.defaultButton(), dialog.button(QMessageBox.No))
+            dialog.button(QMessageBox.No).click()
+
+        QTimer.singleShot(0, choose)
+        result = fluent_ui.AccentMessageBox.question(
+            self.host, "End LIVE?", "Confirm?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        self.assertEqual(result, QMessageBox.No)
+        self.assertEqual(seen, [False])
+
     def test_background_progress_dialog_does_not_make_native_window(self):
         from Libs.gui_tasks import BusyDialog
         progress = BusyDialog(self.host, "Loading")

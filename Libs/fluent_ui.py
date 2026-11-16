@@ -478,6 +478,42 @@ class AccentDialog(_AccentSurface, QtDialog):
 class AccentMessageBox(QtMessageBox):
     """Qt message-box semantics with the workspace's theme and accent surface."""
 
+    @staticmethod
+    def _standard_message(icon, parent, title, text, buttons, default_button):
+        dialog = AccentMessageBox(parent)
+        dialog.setIcon(icon)
+        dialog.setWindowTitle(title)
+        dialog.setText(str(text))
+        dialog.setStandardButtons(buttons)
+        if default_button != QtMessageBox.NoButton:
+            dialog.setDefaultButton(default_button)
+        try:
+            return dialog.exec()
+        finally:
+            dialog.deleteLater()
+
+    @staticmethod
+    def critical(parent, title, text, buttons=QtMessageBox.Ok, defaultButton=QtMessageBox.NoButton):
+        if not is_android_runtime():
+            return QtMessageBox.critical(parent, title, text, buttons, defaultButton)
+        return AccentMessageBox._standard_message(
+            QtMessageBox.Critical, parent, title, text, buttons, defaultButton)
+
+    @staticmethod
+    def information(parent, title, text, buttons=QtMessageBox.Ok, defaultButton=QtMessageBox.NoButton):
+        if not is_android_runtime():
+            return QtMessageBox.information(parent, title, text, buttons, defaultButton)
+        return AccentMessageBox._standard_message(
+            QtMessageBox.Information, parent, title, text, buttons, defaultButton)
+
+    @staticmethod
+    def question(parent, title, text, buttons=QtMessageBox.StandardButtons.Yes | QtMessageBox.StandardButtons.No,
+                 defaultButton=QtMessageBox.NoButton):
+        if not is_android_runtime():
+            return QtMessageBox.question(parent, title, text, buttons, defaultButton)
+        return AccentMessageBox._standard_message(
+            QtMessageBox.Question, parent, title, text, buttons, defaultButton)
+
     def exec(self):
         if is_android_runtime():
             return _android_embedded_dialog_exec(self)
