@@ -3,7 +3,7 @@ import sys
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QLabel, QLineEdit,
+    QApplication, QComboBox, QFileDialog, QLabel, QLineEdit,
     QPushButton, QVBoxLayout, QWidget,
 )
 
@@ -36,6 +36,7 @@ class SimpleAndroidWindow(QWidget):
         self.job = None
         self.server_value = ""
         self.key_value = ""
+        self.last_mode = None
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -53,6 +54,12 @@ class SimpleAndroidWindow(QWidget):
         self.import_button = QPushButton("Impor Cookies TikTok (.json)")
         self.import_button.clicked.connect(self.choose_cookies)
         layout.addWidget(self.import_button)
+
+        layout.addWidget(QLabel("Sumber izin LIVE"))
+        self.client_mode = QComboBox()
+        self.client_mode.addItem("Android LIVE (eksperimental)", "mobile")
+        self.client_mode.addItem("PC LIVE Studio", "pc")
+        layout.addWidget(self.client_mode)
 
         layout.addWidget(QLabel("RapidAPI Signer Key"))
         self.api_key = QLineEdit()
@@ -151,8 +158,10 @@ class SimpleAndroidWindow(QWidget):
         self.clear_credentials()
         title = self.title.text()
         api_key = self.api_key.text()
-        self.request(lambda: get_credentials(title, api_key),
+        mode = self.client_mode.currentData()
+        self.request(lambda: get_credentials(title, api_key, mode),
                      self.show_credentials, "Menghubungi TikTok…")
+        self.last_mode = mode
 
     def show_credentials(self, payload):
         self.server_value = payload["server"]
@@ -168,11 +177,13 @@ class SimpleAndroidWindow(QWidget):
 
     def finish_live(self):
         api_key = self.api_key.text()
-        self.request(lambda: end_live(api_key), self.live_ended,
+        mode = self.last_mode or self.client_mode.currentData()
+        self.request(lambda: end_live(api_key, mode), self.live_ended,
                      "Mengakhiri room LIVE…")
 
     def live_ended(self, ended):
         self.clear_credentials()
+        self.last_mode = None
         self.status.setText("Room LIVE diakhiri." if ended else "Tidak ada room LIVE aktif.")
 
     def clear_credentials(self):
