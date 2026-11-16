@@ -221,10 +221,23 @@ class SimpleAndroidWindow(QWidget):
                        self.qr_button, self.import_button, self.paste_button):
             widget.setVisible(not streamlabs)
         if streamlabs:
+            # Do not keep consuming RapidAPI quota after switching to Streamlabs.
+            self.qr_timer.stop()
+            if self.qr_session is not None:
+                if self.job is None:
+                    self.cancel_qr_login(clear_status=False)
+                else:
+                    self.qr_complete = True
             self.qr_label.hide()
             self.qr_help.hide()
             self.cancel_qr_button.hide()
-        elif self.qr_session is not None:
+        elif self.streamlabs_login is not None:
+            self.streamlabs_timer.stop()
+            if self.job is None:
+                self.cancel_streamlabs_login(clear_status=False)
+            else:
+                self.streamlabs_complete = True
+        if not streamlabs and self.qr_session is not None:
             self.qr_label.show()
             self.qr_help.show()
             self.cancel_qr_button.show()
