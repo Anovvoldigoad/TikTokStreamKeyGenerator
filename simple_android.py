@@ -245,8 +245,16 @@ class SimpleAndroidWindow(QWidget):
             self.status.setText("Gagal: gambar QR dari TikTok tidak valid.")
             return
         self.qr_session = session
-        self.qr_label.setPixmap(image.scaled(235, 235, Qt.AspectRatioMode.KeepAspectRatio,
-                                             Qt.TransformationMode.SmoothTransformation))
+        # Keep QR modules sharp. A 235px smooth-scale distorted long login URLs.
+        # The backend creates a compact PNG with whole-pixel modules already.
+        available = max(260, self.width() - 42)
+        if image.width() > available:
+            image = image.scaled(
+                available, available, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation,
+            )
+        self.qr_label.setMinimumHeight(image.height())
+        self.qr_label.setPixmap(image)
         self.qr_label.show()
         self.qr_help.show()
         self.cancel_qr_button.show()
