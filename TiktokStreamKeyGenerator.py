@@ -4256,7 +4256,9 @@ class StreamKeyGeneratorWindow(AccentWindow):
         self.settings_dialog = QDialog(self)
         self.settings_dialog.setWindowTitle('Settings')
         self.settings_dialog.resize(760, 570)
-        self.settings_dialog.setMinimumWidth(640)
+        # The desktop minimum is wider than a typical Android activity.
+        # The embedded settings sheet must be free to fit its viewport.
+        self.settings_dialog.setMinimumWidth(0 if is_android_runtime() else 640)
         layout = QVBoxLayout(self.settings_dialog)
         layout.setContentsMargins(20, 16, 20, 16)
         navigation = Pivot(self.settings_dialog)

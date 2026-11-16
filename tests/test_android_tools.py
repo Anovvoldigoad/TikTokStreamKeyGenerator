@@ -35,6 +35,12 @@ class AndroidToolButtonTests(unittest.TestCase):
         self.window.show()
         self.addCleanup(self.window.close)
 
+    def test_settings_dialog_can_shrink_to_android_viewport(self):
+        self.assertEqual(self.window.settings_dialog.minimumWidth(), 0)
+        self.window.settings_dialog.show()
+        self.assertFalse(self.window.settings_dialog.isWindow())
+        self.window.settings_dialog.hide()
+
     def test_settings_button_opens_and_closes_in_activity(self):
         dialog = self.window.settings_dialog
         QTimer.singleShot(0, dialog.accept)
