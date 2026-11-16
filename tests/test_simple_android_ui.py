@@ -1,0 +1,87 @@
+"""Offscreen Qt smoke tests for the minimal Android page (no TikTok network)."""
+import os
+import unittest
+from unittest.mock import patch
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from PySide6.QtWidgets import QApplication, QComboBox, QWidget
+
+from simple_android import SimpleAndroidWindow
+
+
+class SimpleAndroidUiTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.application = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        with patch("simple_android.load_settings", return_value={}):
+            self.window = SimpleAndroidWindow()
+        self.addCleanup(self.window.close)
+
+    def test_mode_switch_has_no_native_popup_and_does_not_block_buttons(self):
+        self.assertEqual(self.window.findChildren(QComboBox), [])
+        self.assertEqual(self.window.selected_mode(), "mobile")
+        self.window.pc_radio.click()
+        self.assertEqual(self.window.selected_mode(), "pc")
+        self.window.mobile_radio.click()
+        self.assertEqual(self.window.selected_mode(), "mobile")
+        self.window.busy(True)
+        self.assertTrue(self.window.mobile_radio.isEnabled())
+        self.assertTrue(self.window.pc_radio.isEnabled())
+        self.assertFalse(self.window.generate_button.isEnabled())
+        self.window.busy(False)
+        self.assertTrue(self.window.generate_button.isEnabled())
+        self.assertTrue(self.window.import_button.isEnabled())
+        self.assertTrue(self.window.paste_button.isEnabled())
+
+    def test_generate_captures_correct_mode(self):
+        self.window.api_key.setText("api-key")
+        self.window.pc_radio.click()
+        with patch.object(self.window, "request") as request:
+            self.window.generate()
+            action = request.call_args.args[0]
+        with patch("simple_android.get_credentials",
+                   return_value={"server": "rtmp", "key": "key"}) as call:
+            action()
+        call.assert_called_once_with("TikTok LIVE", "api-key", "pc")
+
+    def test_end_live_preserves_mode_of_created_room(self):
+        self.window.api_key.setText("api-key")
+        self.window.last_mode = "mobile"
+        self.window.pc_radio.click()
+        with patch.object(self.window, "request") as request:
+            self.window.finish_live()
+            action = request.call_args.args[0]
+        with patch("simple_android.end_live", return_value=True) as call:
+            self.assertTrue(action())
+        call.assert_called_once_with("api-key", "mobile")
+
+    def test_qr_confirmation_cleans_up_only_after_finished(self):
+        class FakeQr:
+            def __init__(self):
+                self.closed = False
+            def close(self):
+                self.closed = True
+
+        session = FakeQr()
+        self.window.qr_session = session
+        self.window.job = object()
+        self.window.handle_qr_status("confirmed")
+        self.assertTrue(self.window.qr_complete)
+        self.assertFalse(session.closed)
+        self.window.job_finished()
+        self.assertTrue(session.closed)
+        self.assertIsNone(self.window.qr_session)
+        self.assertFalse(self.window.qr_complete)
+
+    def test_clipboard_cookie_import_is_available_without_file_picker(self):
+        self.application.clipboard().setText('[{"name":"sessionid","value":"private"}]')
+        with patch("simple_android.import_cookies_text", return_value="/private/cookies.json") as load:
+            self.window.paste_cookies()
+        load.assert_called_once()
+        self.assertIn("Login tersedia", self.window.cookie_status.text())
+
+
+if __name__ == "__main__":
+    unittest.main()
