@@ -127,7 +127,8 @@ class SimpleAndroidCoreTests(unittest.TestCase):
                 self.qr_client_secret = "expected"
                 self.closed = False
             def get_qrcode(self):
-                return {"token": "token", "qrcode": "cG5n"}
+                return {"token": "token", "qrcode_index_url":
+                        "https://www.tiktok.com/qr/login?next_url=mock-valid"}
             def check_qrconnect(self, token):
                 return {"data": {"status": "confirmed", "client_secret": "expected"}}
             def save_cookies(self, path):
@@ -140,19 +141,41 @@ class SimpleAndroidCoreTests(unittest.TestCase):
              patch.dict(sys.modules, {"TiktokStreamKeyGenerator": SimpleNamespace(
                  LiveStudioBrowserLoginClient=FakeQrClient)}):
             session = core.QrLoginSession()
-            self.assertEqual(session.start("private-api-key"), "cG5n")
+            self.assertTrue(session.start("private-api-key").startswith("iVBORw0KGgo"))
             self.assertEqual(session.poll(), "confirmed")
             self.assertEqual(core.load_settings()["cookies_path"], str(self.data / "qr-cookies.json"))
             self.assertEqual(core.validate_cookies(self.data / "qr-cookies.json")[0]["value"], "private-session")
             session.close()
             self.assertTrue(session.client is None)
 
+    def test_actual_qr_png_is_valid_and_readable(self):
+        import base64
+        import segno
+        import io
+        url = "https://www.tiktok.com/qr/login?next_url=https%3A%2F%2Fwww.tiktok.com"
+        result = core.qr_png_from_response({"qrcode_index_url": url})
+        data = base64.b64decode(result, validate=True)
+        self.assertTrue(data.startswith(b"\\x89PNG\\r\\n\\x1a\\n"))
+        self.assertGreater(len(data), 100)
+
+        buffer = io.BytesIO()
+        segno.make_qr(url).save(buffer, kind="png", scale=4)
+        fallback = core.qr_png_from_response({
+            "qrcode": base64.b64encode(buffer.getvalue()).decode("ascii")
+        })
+        self.assertTrue(base64.b64decode(fallback).startswith(b"\\x89PNG"))
+        with self.assertRaisesRegex(ValueError, "PNG"):
+            core.qr_png_from_response({"qrcode": "cG5n"})
+        with self.assertRaisesRegex(ValueError, "tidak valid"):
+            core.qr_png_from_response({"qrcode_index_url": "http://example.invalid"})
+
     def test_qr_login_does_not_accept_wrong_client_secret(self):
         class FakeQrClient:
             def __init__(self, *_):
                 self.qr_client_secret = "expected"
             def get_qrcode(self):
-                return {"token": "token", "qrcode": "cG5n"}
+                return {"token": "token", "qrcode_index_url":
+                        "https://www.tiktok.com/qr/login?next_url=mock-valid"}
             def check_qrconnect(self, *_):
                 return {"data": {"status": "confirmed", "client_secret": "different"}}
             def save_cookies(self, path):
