@@ -182,6 +182,44 @@ def import_cookies_text(text):
     return str(target)
 
 
+def qr_png_from_response(payload):
+    """Produce a sharp, validated PNG from TikTok's login URL or image.
+
+    QR modules are rendered at an integer pixel scale with a quiet zone.
+    This avoids Android Qt downsampling a large QR to a blurry 235px preview.
+    """
+    import base64
+    import io
+    from urllib.parse import urlsplit
+
+    if not isinstance(payload, dict):
+        raise ValueError("TikTok tidak mengembalikan data QR yang valid.")
+    url = str(payload.get("qrcode_index_url") or "").strip()
+    if url:
+        parsed = urlsplit(url)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError("Alamat QR login TikTok tidak valid.")
+        import segno
+        code = segno.make_qr(url, error="L", boost_error=False)
+        modules = code.symbol_size(scale=1, border=4)[0]
+        # This normally yields a 260-340px QR, which fits an Android phone.
+        scale = max(1, min(8, 330 // modules))
+        buffer = io.BytesIO()
+        code.save(buffer, kind="png", scale=scale, border=4)
+        image = buffer.getvalue()
+    else:
+        encoded = str(payload.get("qrcode") or "").strip()
+        if encoded.startswith("data:image/png;base64,"):
+            encoded = encoded.partition(",")[2]
+        try:
+            image = base64.b64decode(encoded, validate=True)
+        except (ValueError, base64.binascii.Error) as exc:
+            raise ValueError("TikTok mengembalikan QR Base64 yang tidak valid.") from exc
+    if not image.startswith(b"\x89PNG\r\n\x1a\n") or len(image) < 100:
+        raise ValueError("QR login bukan gambar PNG yang valid.")
+    return base64.b64encode(image).decode("ascii")
+
+
 class QrLoginSession:
     """Standalone TikTok Live Studio QR login using the existing signed client.
 
@@ -206,9 +244,9 @@ class QrLoginSession:
         try:
             result = client.get_qrcode()
             token = str(result.get("token") or "")
-            image = result.get("qrcode") or ""
-            if not token or not image:
-                raise RuntimeError("TikTok tidak mengembalikan gambar QR login.")
+            if not token:
+                raise RuntimeError("TikTok tidak mengembalikan token QR login.")
+            image = qr_png_from_response(result)
         except Exception:
             client.close()
             raise
