@@ -3,7 +3,7 @@ import sys
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+    QApplication, QFileDialog, QLabel, QLineEdit,
     QPushButton, QVBoxLayout, QWidget,
 )
 
@@ -167,7 +167,8 @@ class SimpleAndroidWindow(QWidget):
         )
 
     def finish_live(self):
-        self.request(lambda: end_live(self.api_key.text()), self.live_ended,
+        api_key = self.api_key.text()
+        self.request(lambda: end_live(api_key), self.live_ended,
                      "Mengakhiri room LIVE…")
 
     def live_ended(self, ended):
