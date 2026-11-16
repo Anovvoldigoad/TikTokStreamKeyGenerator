@@ -75,6 +75,32 @@ class SimpleAndroidUiTests(unittest.TestCase):
         self.assertIsNone(self.window.qr_session)
         self.assertFalse(self.window.qr_complete)
 
+    def test_login_qr_button_uses_rapidapi_and_renders_image(self):
+        from Libs.simple_android_stream import qr_png_from_response
+        png = qr_png_from_response({
+            "qrcode_index_url": "https://www.tiktok.com/qr/login?next_url=test"
+        })
+        class FakeSession:
+            def __init__(self):
+                self.received_key = None
+            def start(self, key):
+                self.received_key = key
+                return png
+            def close(self):
+                pass
+        session = FakeSession()
+        self.window.api_key.setText("private-api-key")
+        with patch("simple_android.QrLoginSession", return_value=session), \
+             patch.object(self.window, "request") as request:
+            self.window.qr_button.click()
+            action, on_success = request.call_args.args[:2]
+        result = action()
+        self.assertEqual(session.received_key, "private-api-key")
+        on_success(result)
+        self.assertFalse(self.window.qr_label.pixmap().isNull())
+        self.assertEqual(self.window.qr_session, session)
+        self.window.cancel_qr_login()
+
     def test_real_qr_image_renders_in_qt_label_without_popup(self):
         import base64
         from Libs.simple_android_stream import qr_png_from_response
