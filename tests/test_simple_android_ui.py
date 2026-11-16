@@ -75,6 +75,57 @@ class SimpleAndroidUiTests(unittest.TestCase):
         self.assertIsNone(self.window.qr_session)
         self.assertFalse(self.window.qr_complete)
 
+    def test_real_qr_image_renders_in_qt_label_without_popup(self):
+        import base64
+        from Libs.simple_android_stream import qr_png_from_response
+
+        encoded = qr_png_from_response({
+            "qrcode_index_url": "https://www.tiktok.com/qr/login?next_url=mock-valid"
+        })
+        class FakeSession:
+            def __init__(self):
+                self.closed = False
+            def close(self):
+                self.closed = True
+        session = FakeSession()
+        self.window.show_qr((session, encoded))
+        shown = self.window.qr_label.pixmap()
+        self.assertIsNotNone(shown)
+        self.assertFalse(shown.isNull())
+        self.assertGreater(shown.width(), 200)
+        self.assertFalse(self.window.qr_label.isHidden())
+        self.assertFalse(self.window.cancel_qr_button.isHidden())
+        self.assertTrue(self.window.qr_timer.isActive())
+        self.window.cancel_qr_login()
+        self.assertTrue(session.closed)
+        self.assertTrue(self.window.qr_label.isHidden())
+
+    def test_show_qr_rejects_non_image_instead_of_fake_success(self):
+        class FakeSession:
+            def __init__(self):
+                self.closed = False
+            def close(self):
+                self.closed = True
+        session = FakeSession()
+        self.window.show_qr((session, "cG5n"))
+        self.assertTrue(session.closed)
+        self.assertIsNone(self.window.qr_session)
+        self.assertTrue(self.window.qr_label.isHidden())
+        self.assertIn("tidak valid", self.window.status.text())
+
+    def test_credentials_update_display_and_copy(self):
+        payload = {"server": "rtmps://example.invalid/live", "key": "private-test",
+                   "mode": "mobile", "resumed": False}
+        self.window.show_credentials(payload)
+        self.assertEqual(self.window.server.text(), payload["server"])
+        self.assertTrue(self.window.copy_server.isEnabled())
+        self.assertTrue(self.window.copy_key.isEnabled())
+        self.window.copy_key.click()
+        self.assertEqual(self.application.clipboard().text(), payload["key"])
+        self.window.live_ended(True)
+        self.assertFalse(self.window.copy_key.isEnabled())
+        self.assertEqual(self.window.key.text(), "")
+
     def test_clipboard_cookie_import_is_available_without_file_picker(self):
         self.application.clipboard().setText('[{"name":"sessionid","value":"private"}]')
         with patch("simple_android.import_cookies_text", return_value="/private/cookies.json") as load:
