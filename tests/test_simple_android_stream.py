@@ -88,5 +88,86 @@ class SimpleAndroidCoreTests(unittest.TestCase):
                 core.get_credentials("Testing", "private")
 
 
+    def test_clipboard_json_creates_private_cookie_file(self):
+        payload = json.dumps([{"name": "sessionid", "value": "test-private"}])
+        target = Path(core.import_cookies_text(payload))
+        self.assertEqual(target.parent, self.data)
+        self.assertEqual(core.load_settings()["cookies_path"], str(target))
+        self.assertEqual(core.validate_cookies(target)[0]["value"], "test-private")
+        with self.assertRaises(ValueError):
+            core.import_cookies_text(" ")
+        self.assertEqual(core.validate_cookies(target)[0]["value"], "test-private")
+
+    def test_end_live_uses_selected_mobile_identity(self):
+        seen = {}
+        class FakeStream:
+            def __init__(self, **kwargs):
+                seen["mode"] = kwargs["device_type"]
+            def __enter__(self):
+                return self
+            def __exit__(self, *_):
+                pass
+            def getContinuableStreamInfo(self, **_):
+                return {"has_room": True, "room_id": "room-1",
+                        "stream_id": "stream-1", "priority_region": "id"}
+            def endStream(self, **kwargs):
+                seen["end"] = kwargs
+
+        with patch.object(core, "_ready_settings", return_value=({}, "/tmp/unused")), \
+             patch.object(core, "_device_profile", return_value={"device_id": "123", "install_id": "456"}), \
+             patch.dict(sys.modules, {"TiktokStreamKeyGenerator": SimpleNamespace(Stream=FakeStream)}):
+            self.assertTrue(core.end_live("test-key", "mobile"))
+        self.assertEqual(seen["mode"], "mobile")
+        self.assertEqual(seen["end"]["priority_region"], "id")
+        self.assertEqual(seen["end"]["room_id"], "room-1")
+
+    def test_qr_login_writes_verified_cookies_to_private_storage(self):
+        class FakeQrClient:
+            def __init__(self, device_id, install_id):
+                self.qr_client_secret = "expected"
+                self.closed = False
+            def get_qrcode(self):
+                return {"token": "token", "qrcode": "cG5n"}
+            def check_qrconnect(self, token):
+                return {"data": {"status": "confirmed", "client_secret": "expected"}}
+            def save_cookies(self, path):
+                Path(path).write_text(json.dumps(
+                    [{"name": "sessionid", "value": "private-session"}]))
+            def close(self):
+                self.closed = True
+
+        with patch.object(core, "_device_profile", return_value={"device_id": "123", "install_id": "456"}), \
+             patch.dict(sys.modules, {"TiktokStreamKeyGenerator": SimpleNamespace(
+                 LiveStudioBrowserLoginClient=FakeQrClient)}):
+            session = core.QrLoginSession()
+            self.assertEqual(session.start("private-api-key"), "cG5n")
+            self.assertEqual(session.poll(), "confirmed")
+            self.assertEqual(core.load_settings()["cookies_path"], str(self.data / "qr-cookies.json"))
+            self.assertEqual(core.validate_cookies(self.data / "qr-cookies.json")[0]["value"], "private-session")
+            session.close()
+            self.assertTrue(session.client is None)
+
+    def test_qr_login_does_not_accept_wrong_client_secret(self):
+        class FakeQrClient:
+            def __init__(self, *_):
+                self.qr_client_secret = "expected"
+            def get_qrcode(self):
+                return {"token": "token", "qrcode": "cG5n"}
+            def check_qrconnect(self, *_):
+                return {"data": {"status": "confirmed", "client_secret": "different"}}
+            def save_cookies(self, path):
+                raise AssertionError("wrong QR confirmation cannot save cookies")
+            def close(self):
+                pass
+
+        with patch.object(core, "_device_profile", return_value={"device_id": "123", "install_id": "456"}), \
+             patch.dict(sys.modules, {"TiktokStreamKeyGenerator": SimpleNamespace(
+                 LiveStudioBrowserLoginClient=FakeQrClient)}):
+            session = core.QrLoginSession()
+            session.start("private-api-key")
+            self.assertEqual(session.poll(), "scanned")
+            self.assertNotIn("cookies_path", core.load_settings())
+            session.close()
+
 if __name__ == "__main__":
     unittest.main()
