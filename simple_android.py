@@ -389,8 +389,17 @@ class SimpleAndroidWindow(QWidget):
             self.streamlabs_complete = False
             self.cancel_streamlabs_login(clear_status=False)
 
+    def prepare_native_backend(self):
+        # Backend imports other Qt components, so never first-import in QThread.
+        try:
+            import TiktokStreamKeyGenerator  # noqa: F401
+            return True
+        except Exception as exc:
+            self.status.setText("Backend TikTok LIVE asli gagal dimuat: " + str(exc))
+            return False
+
     def start_qr_login(self):
-        if self.job is not None:
+        if self.job is not None or not self.prepare_native_backend():
             return
         self.cancel_qr_login()
         api_key = self.api_key.text()
@@ -471,10 +480,12 @@ class SimpleAndroidWindow(QWidget):
             self.status.setText("Login QR dibatalkan.")
 
     def generate(self):
+        mode = self.selected_mode()
+        if mode != "streamlabs" and not self.prepare_native_backend():
+            return
         self.clear_credentials()
         title = self.title.text()
         api_key = self.api_key.text()
-        mode = self.selected_mode()
         self.request(lambda: get_credentials(title, api_key, mode),
                      self.show_credentials, "Menghubungi TikTok…")
 
@@ -494,6 +505,8 @@ class SimpleAndroidWindow(QWidget):
     def finish_live(self):
         api_key = self.api_key.text()
         mode = self.last_mode or self.selected_mode()
+        if mode != "streamlabs" and not self.prepare_native_backend():
+            return
         self.request(lambda: end_live(api_key, mode),
                      self.live_ended, "Mengakhiri room LIVE…")
 
@@ -526,8 +539,8 @@ class SimpleAndroidWindow(QWidget):
 
 
 def main():
-    # Load original signer/room backend on the GUI thread, not in QThread.
-    import TiktokStreamKeyGenerator  # noqa: F401
+    # Streamlabs starts without loading the desktop TikTok signer and Fluent UI.
+    # The native backend is loaded on Qt's GUI thread only when selected.
     app = QApplication.instance() or QApplication(sys.argv)
     window = SimpleAndroidWindow()
     window.resize(390, 680)
