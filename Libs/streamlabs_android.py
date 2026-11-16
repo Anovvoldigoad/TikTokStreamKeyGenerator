@@ -102,6 +102,7 @@ class StreamlabsBrowserLogin:
         digest = hashlib.sha256(self.verifier.encode("ascii")).digest()
         self.challenge = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
         self.server = None
+        self._server_thread = None
         self._code = None
         self._error = None
         self._received = threading.Event()
@@ -117,8 +118,7 @@ class StreamlabsBrowserLogin:
             def do_GET(self):
                 query = urlsplit(self.path)
                 args = parse_qs(query.query)
-                good = (query.path == "/" and
-                        args.get("success") == ["true"] and
+                good = (args.get("success") == ["true"] and
                         bool(args.get("code", [""])[0]))
                 if not flow._received.is_set():
                     if good:
@@ -141,10 +141,12 @@ class StreamlabsBrowserLogin:
         server = HTTPServer(("127.0.0.1", 0), Handler)
         self.server = server
         self.started = time.monotonic()
-        threading.Thread(
+        thread = threading.Thread(
             target=server.serve_forever, kwargs={"poll_interval": 0.1},
             name="streamlabs-auth-callback", daemon=True,
-        ).start()
+        )
+        thread.start()
+        self._server_thread = thread
         params = (
             f"skip_splash=true&external=electron&tiktok&force_verify"
             f"&origin=slobs&port={server.server_port}"
@@ -187,7 +189,9 @@ class StreamlabsBrowserLogin:
     def close(self):
         if self.server is not None:
             server, self.server = self.server, None
-            server.shutdown()
+            if self._server_thread is not None and self._server_thread.is_alive():
+                server.shutdown()
             server.server_close()
+        self._server_thread = None
         self._code = None
         self.verifier = ""
