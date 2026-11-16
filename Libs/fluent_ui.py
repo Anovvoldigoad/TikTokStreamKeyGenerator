@@ -1,5 +1,5 @@
 """Shared Fluent controls for the existing PySide6 application."""
-from PySide6.QtCore import QEventLoop, QObject, Qt, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, QObject, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPalette
 from PySide6.QtWidgets import (QApplication, QDialog as QtDialog, QFrame, QHBoxLayout,
     QLabel, QGridLayout, QScrollArea, QVBoxLayout, QWidget, QSizePolicy, QToolTip,
@@ -73,6 +73,19 @@ class LineEdit(FluentLineEdit):
         self.setText(str(text))
 
 
+class _AndroidSheetResizeFilter(QObject):
+    """Keep an embedded modal sheet aligned with the Android activity."""
+
+    def __init__(self, sheet):
+        super().__init__(sheet)
+        self.sheet = sheet
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.Resize:
+            self.sheet.setGeometry(watched.rect())
+        return False
+
+
 def _android_show_dialog(dialog):
     """Display a Qt dialog inside the existing activity window.
 
@@ -108,6 +121,8 @@ def _android_show_dialog(dialog):
     scroll.setWidget(dialog)
     dialog._android_sheet = sheet
     dialog._android_scroll = scroll
+    dialog._android_resize_filter = _AndroidSheetResizeFilter(sheet)
+    host.installEventFilter(dialog._android_resize_filter)
     sheet.show()
     sheet.raise_()
     QtDialog.show(dialog)
@@ -118,10 +133,13 @@ def _android_hide_dialog(dialog):
     if sheet is None:
         return
     QtDialog.hide(dialog)
+    host = sheet.parentWidget()
+    host.removeEventFilter(dialog._android_resize_filter)
     dialog._android_scroll.takeWidget()
-    dialog.setParent(sheet.parentWidget(), Qt.Widget)
+    dialog.setParent(host, Qt.Widget)
     dialog._android_sheet = None
     dialog._android_scroll = None
+    dialog._android_resize_filter = None
     sheet.hide()
     sheet.deleteLater()
 

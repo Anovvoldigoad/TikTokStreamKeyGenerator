@@ -35,6 +35,17 @@ class AndroidModalSurfaceTests(unittest.TestCase):
         self.assertEqual(dialog.exec(), QDialog.DialogCode.Accepted)
         self.assertFalse(dialog.isWindow())
 
+    def test_open_dialog_tracks_activity_resize(self):
+        dialog = fluent_ui.AccentDialog(self.host)
+        dialog.show()
+        sheet = dialog._android_sheet
+        self.assertEqual(sheet.geometry(), self.host.rect())
+        self.host.resize(560, 910)
+        QApplication.processEvents()
+        self.assertEqual(sheet.geometry(), self.host.rect())
+        dialog.hide()
+        self.assertIsNone(dialog._android_resize_filter)
+
     def test_messagebox_button_result_without_native_popup(self):
         message = fluent_ui.AccentMessageBox(self.host)
         message.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
