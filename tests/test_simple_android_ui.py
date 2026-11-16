@@ -84,7 +84,7 @@ class SimpleAndroidUiTests(unittest.TestCase):
 
         session = FakeSession()
         with patch("simple_android.StreamlabsBrowserLogin", return_value=session), \
-             patch("simple_android.QDesktopServices.openUrl", return_value=True) as opened:
+             patch.object(self.window, "open_streamlabs_browser", return_value=True) as opened:
             self.window.streamlabs_browser_button.click()
         self.assertTrue(self.window.streamlabs_timer.isActive())
         opened.assert_called_once()
