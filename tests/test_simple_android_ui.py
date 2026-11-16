@@ -104,6 +104,27 @@ class SimpleAndroidUiTests(unittest.TestCase):
         self.assertTrue(session.closed)
         self.assertIsNone(self.window.streamlabs_login)
 
+    def test_switching_modes_cancels_unneeded_login_pollers(self):
+        class FakeLogin:
+            def __init__(self):
+                self.closed = False
+            def close(self):
+                self.closed = True
+
+        streamlabs_session = FakeLogin()
+        self.window.streamlabs_login = streamlabs_session
+        self.window.streamlabs_timer.start()
+        self.window.pc_radio.click()
+        self.assertTrue(streamlabs_session.closed)
+        self.assertFalse(self.window.streamlabs_timer.isActive())
+
+        qr_session = FakeLogin()
+        self.window.qr_session = qr_session
+        self.window.qr_timer.start()
+        self.window.streamlabs_radio.click()
+        self.assertTrue(qr_session.closed)
+        self.assertFalse(self.window.qr_timer.isActive())
+
     def test_streamlabs_token_paste_validates_before_success(self):
         self.application.clipboard().setText("private-test-token")
         with patch.object(self.window, "request") as request:
