@@ -132,6 +132,7 @@ def get_credentials(title, api_key, mode="pc"):
             "server": stream.baseStreamUrl,
             "key": stream.streamKey,
             "room_id": stream.roomId,
+            "mode": mode,
             "resumed": resumed,
         }
 
