@@ -38,6 +38,7 @@ class SimpleAndroidWindow(QWidget):
         self.setMinimumWidth(300)
         self.job = None
         self.qr_session = None
+        self.qr_complete = False
         self.server_value = ""
         self.key_value = ""
         self.last_mode = None
@@ -219,6 +220,9 @@ class SimpleAndroidWindow(QWidget):
     def job_finished(self):
         self.job = None
         self.busy(False)
+        if self.qr_complete:
+            self.qr_complete = False
+            self.cancel_qr_login(clear_status=False)
 
     def start_qr_login(self):
         if self.job is not None:
@@ -257,13 +261,15 @@ class SimpleAndroidWindow(QWidget):
 
     def handle_qr_status(self, status):
         if status == "confirmed":
+            self.qr_timer.stop()
+            self.qr_complete = True
             self.cookie_status.setText("Berhasil login TikTok. Cookies tersimpan privat.")
             self.status.setText("Login berhasil. Sekarang ambil RTMP & Stream Key.")
-            self.cancel_qr_login(clear_status=False)
         elif status == "scanned":
             self.status.setText("QR dipindai. Konfirmasi login di aplikasi TikTok.")
         elif status in ("expired", "timeout"):
-            self.cancel_qr_login(clear_status=False)
+            self.qr_timer.stop()
+            self.qr_complete = True
             self.status.setText("QR sudah kedaluwarsa. Tekan Login TikTok lewat QR lagi.")
         elif status == "new":
             self.status.setText("Menunggu QR dipindai oleh TikTok.")
