@@ -21,10 +21,13 @@ class SimpleAndroidUiTests(unittest.TestCase):
 
     def test_mode_switch_has_no_native_popup_and_does_not_block_buttons(self):
         self.assertEqual(self.window.findChildren(QComboBox), [])
+        self.assertEqual(self.window.selected_mode(), "pc")
+        self.assertTrue(self.window.pc_radio.isChecked())
+        self.assertTrue(self.window.streamlabs_browser_button.isHidden())
+        self.assertFalse(self.window.native_check_button.isHidden())
+        self.window.streamlabs_radio.click()
         self.assertEqual(self.window.selected_mode(), "streamlabs")
-        self.assertTrue(self.window.streamlabs_radio.isChecked())
         self.assertTrue(self.window.api_key.isHidden())
-        self.assertFalse(self.window.streamlabs_browser_button.isHidden())
         self.window.pc_radio.click()
         self.assertEqual(self.window.selected_mode(), "pc")
         self.window.mobile_radio.click()
@@ -38,6 +41,21 @@ class SimpleAndroidUiTests(unittest.TestCase):
         self.assertTrue(self.window.import_button.isEnabled())
         self.assertTrue(self.window.paste_button.isEnabled())
 
+    def test_native_session_check_uses_no_rapidapi_or_streamlabs(self):
+        self.assertEqual(self.window.selected_mode(), "pc")
+        with patch.object(self.window, "request") as request:
+            self.window.native_check_button.click()
+            action, on_success = request.call_args.args[:2]
+        with patch("simple_android.check_native_login_session",
+                   return_value={"state": "valid", "username": "mock_user"}) as check:
+            result = action()
+        check.assert_called_once_with()
+        on_success(result)
+        self.assertIn("mock_user", self.window.native_check_status.text())
+        self.assertIn("BELUM", self.window.status.text())
+        self.window.show_native_login_result({"state": "expired", "username": ""})
+        self.assertIn("kedaluwarsa", self.window.native_check_status.text())
+
     def test_generate_captures_correct_mode(self):
         self.window.api_key.setText("api-key")
         self.window.pc_radio.click()
@@ -50,6 +68,7 @@ class SimpleAndroidUiTests(unittest.TestCase):
         call.assert_called_once_with("TikTok LIVE", "api-key", "pc")
 
     def test_streamlabs_generate_and_end_never_require_api_key(self):
+        self.window.streamlabs_radio.click()
         self.assertEqual(self.window.selected_mode(), "streamlabs")
         with patch.object(self.window, "request") as request:
             self.window.generate()
@@ -83,6 +102,7 @@ class SimpleAndroidUiTests(unittest.TestCase):
                 self.closed = True
 
         session = FakeSession()
+        self.window.streamlabs_radio.click()
         with patch("simple_android.StreamlabsBrowserLogin", return_value=session), \
              patch.object(self.window, "open_streamlabs_browser", return_value=True) as opened:
             self.window.streamlabs_browser_button.click()
@@ -112,6 +132,7 @@ class SimpleAndroidUiTests(unittest.TestCase):
                 self.closed = True
 
         streamlabs_session = FakeLogin()
+        self.window.streamlabs_radio.click()
         self.window.streamlabs_login = streamlabs_session
         self.window.streamlabs_timer.start()
         self.window.pc_radio.click()
@@ -126,6 +147,7 @@ class SimpleAndroidUiTests(unittest.TestCase):
         self.assertFalse(self.window.qr_timer.isActive())
 
     def test_streamlabs_token_paste_validates_before_success(self):
+        self.window.streamlabs_radio.click()
         self.application.clipboard().setText("private-test-token")
         with patch.object(self.window, "request") as request:
             self.window.streamlabs_paste_token_button.click()
