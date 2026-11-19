@@ -57,6 +57,76 @@ def import_cookies(selected_path):
     return path
 
 
+
+def check_native_login_session():
+    """Read-only TikTok WEB login check; never asserts LIVE Studio/RTMP access.
+
+    The web account-info endpoint does not use the LIVE Studio RapidAPI signer.
+    Web anti-bot responses are inconclusive, not proof that a user is logged out.
+    """
+    import requests
+
+    cookie_path = load_settings().get("cookies_path")
+    if not cookie_path:
+        raise ValueError("Impor cookies JSON TikTok dulu untuk memeriksa sesi.")
+    entries = validate_cookies(cookie_path)
+    cookies = {}
+    for item in entries:
+        name = item["name"]
+        domain = str(item.get("domain") or "").lstrip(".").lower()
+        if (not domain or domain == "tiktok.com" or
+                domain.endswith(".tiktok.com")):
+            cookies[name] = item["value"]
+    if not any(cookies.get(name) for name in ("sessionid", "sessionid_ss", "sid_tt")):
+        raise ValueError("Cookies tidak berisi sesi TikTok dari domain tiktok.com.")
+
+    try:
+        response = requests.get(
+            "https://www.tiktok.com/passport/web/account/info/",
+            params={"aid": "1988", "app_language": "en", "app_name": "tiktok_web"},
+            cookies=cookies,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
+                ),
+                "Accept": "application/json",
+                "Referer": "https://www.tiktok.com/",
+            },
+            timeout=15,
+            allow_redirects=False,
+        )
+    except requests.RequestException as exc:
+        raise RuntimeError("Tidak dapat menghubungi TikTok untuk cek sesi.") from exc
+
+    if response.status_code != 200:
+        raise RuntimeError(
+            "TikTok tidak mengizinkan pemeriksaan sesi (HTTP "
+            + str(response.status_code) + "). Status login belum bisa dipastikan."
+        )
+    try:
+        result = response.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            "TikTok mengirim halaman non-JSON. Status login belum bisa dipastikan."
+        ) from exc
+    if not isinstance(result, dict):
+        raise RuntimeError("Respons TikTok tidak dikenali. Status login belum bisa dipastikan.")
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    if str(data.get("error_code") or "") == "13" or data.get("name") == "session_expired":
+        return {"state": "expired", "username": ""}
+    if result.get("message") != "success" or not (
+        data.get("user_id_str") or data.get("sec_user_id")
+    ):
+        raise RuntimeError(
+            "TikTok belum mengonfirmasi sesi login. Ini bukan bukti akun tidak bisa LIVE."
+        )
+    return {
+        "state": "valid",
+        "username": str(data.get("username") or data.get("screen_name") or ""),
+    }
+
+
 def _ready_settings(api_key):
     settings = load_settings()
     api_key = str(api_key or "").strip()
