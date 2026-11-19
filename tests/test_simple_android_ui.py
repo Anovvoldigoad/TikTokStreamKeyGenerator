@@ -41,6 +41,17 @@ class SimpleAndroidUiTests(unittest.TestCase):
         self.assertTrue(self.window.import_button.isEnabled())
         self.assertTrue(self.window.paste_button.isEnabled())
 
+    def test_native_without_signer_never_loads_desktop_backend(self):
+        self.assertEqual(self.window.selected_mode(), "pc")
+        with patch.object(self.window, "prepare_native_backend") as backend, \
+             patch.object(self.window, "request") as request:
+            self.window.generate()
+            self.window.start_qr_login()
+            self.window.finish_live()
+        backend.assert_not_called()
+        request.assert_not_called()
+        self.assertIn("signer", self.window.status.text())
+
     def test_native_session_check_uses_no_rapidapi_or_streamlabs(self):
         self.assertEqual(self.window.selected_mode(), "pc")
         with patch.object(self.window, "request") as request:
