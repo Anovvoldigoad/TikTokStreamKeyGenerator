@@ -54,11 +54,11 @@ class SimpleAndroidUiTests(unittest.TestCase):
 
     def test_native_session_check_uses_no_rapidapi_or_streamlabs(self):
         self.assertEqual(self.window.selected_mode(), "pc")
-        with patch.object(self.window, "request") as request:
+        with patch("simple_android.check_native_login_session",
+                   return_value={"state": "valid", "username": "mock_user"}) as check, \
+             patch.object(self.window, "request") as request:
             self.window.native_check_button.click()
             action, on_success = request.call_args.args[:2]
-        with patch("simple_android.check_native_login_session",
-                   return_value={"state": "valid", "username": "mock_user"}) as check:
             result = action()
         check.assert_called_once_with()
         on_success(result)
