@@ -450,10 +450,18 @@ class SimpleAndroidWindow(QWidget):
             return False
 
     def start_qr_login(self):
-        if self.job is not None or not self.prepare_native_backend():
+        if self.job is not None:
+            return
+        api_key = self.api_key.text().strip()
+        if not api_key:
+            self.status.setText(
+                "Login QR LIVE Studio native memerlukan signer RapidAPI. "
+                "Cek Sesi TikTok tersedia tanpa key setelah impor cookies."
+            )
+            return
+        if not self.prepare_native_backend():
             return
         self.cancel_qr_login()
-        api_key = self.api_key.text()
         session = QrLoginSession()
         self.request(lambda: (session, session.start(api_key)),
                      self.show_qr, "Menyiapkan login QR TikTok…")
@@ -532,11 +540,17 @@ class SimpleAndroidWindow(QWidget):
 
     def generate(self):
         mode = self.selected_mode()
+        api_key = self.api_key.text().strip()
+        if mode != "streamlabs" and not api_key:
+            self.status.setText(
+                "TikTok native belum dapat membuat RTMP/Stream Key tanpa signer. "
+                "Cek Sesi TikTok bisa digunakan tanpa RapidAPI."
+            )
+            return
         if mode != "streamlabs" and not self.prepare_native_backend():
             return
         self.clear_credentials()
         title = self.title.text()
-        api_key = self.api_key.text()
         self.request(lambda: get_credentials(title, api_key, mode),
                      self.show_credentials, "Menghubungi TikTok…")
 
@@ -554,8 +568,14 @@ class SimpleAndroidWindow(QWidget):
         )
 
     def finish_live(self):
-        api_key = self.api_key.text()
+        api_key = self.api_key.text().strip()
         mode = self.last_mode or self.selected_mode()
+        if mode != "streamlabs" and not api_key:
+            self.status.setText(
+                "Tidak dapat mengakhiri room TikTok native tanpa signer. "
+                "Akhiri LIVE dari aplikasi TikTok bila masih aktif."
+            )
+            return
         if mode != "streamlabs" and not self.prepare_native_backend():
             return
         self.request(lambda: end_live(api_key, mode),
