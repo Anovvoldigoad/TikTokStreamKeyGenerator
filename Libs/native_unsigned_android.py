@@ -200,6 +200,7 @@ class UnsignedStudioClient:
 
 
 _active = None
+_streaming = False
 
 
 def check_native_studio():
@@ -222,14 +223,25 @@ def start_native_studio(title):
 def heartbeat_native_studio():
     if _active is None:
         return False
-    UnsignedStudioClient().ping(_active["ping_room_id"], _active["stream_id"], 1)
+    UnsignedStudioClient().ping(
+        _active["ping_room_id"], _active["stream_id"], 2 if _streaming else 1
+    )
+    return True
+
+
+def mark_native_studio_streaming():
+    global _streaming
+    if _active is None:
+        raise RuntimeError("Belum ada room LIVE Studio aktif.")
+    _streaming = True
     return True
 
 
 def end_native_studio():
-    global _active
+    global _active, _streaming
     if _active is None:
         return False
     UnsignedStudioClient().ping(_active["ping_room_id"], _active["stream_id"], 4)
     _active = None
+    _streaming = False
     return True
