@@ -76,12 +76,12 @@ class SimpleAndroidUiTests(unittest.TestCase):
 
     def test_unsigned_studio_preflight_and_generate_without_api_key(self):
         self.assertEqual(self.window.selected_mode(), "native_unsigned")
-        with patch.object(self.window, "request") as request:
-            self.window.studio_check_button.click()
-            action, callback = request.call_args.args[:2]
         with patch("simple_android.check_native_studio", return_value={
             "allowed": True, "host": "webcast.tiktokv.com", "status_code": 0
-        }) as check:
+        }) as check, \
+             patch.object(self.window, "request") as request:
+            self.window.studio_check_button.click()
+            action, callback = request.call_args.args[:2]
             response = action()
         check.assert_called_once_with()
         callback(response)
