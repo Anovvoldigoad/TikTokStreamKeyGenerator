@@ -15,6 +15,9 @@ from Libs.simple_android_stream import (
     check_native_login_session,
 )
 from Libs.streamlabs_android import StreamlabsBrowserLogin
+from Libs.native_unsigned_android import (
+    check_native_studio, heartbeat_native_studio, mark_native_studio_streaming,
+)
 
 
 class RequestThread(QThread):
@@ -47,6 +50,7 @@ class SimpleAndroidWindow(QWidget):
         self.server_value = ""
         self.key_value = ""
         self.last_mode = None
+        self.native_room_active = False
 
         outer = QVBoxLayout(self)
         scroll = QScrollArea(self)
@@ -98,6 +102,12 @@ class SimpleAndroidWindow(QWidget):
         self.native_check_status = QLabel("Sesi akun TikTok belum diperiksa.")
         self.native_check_status.setWordWrap(True)
         layout.addWidget(self.native_check_status)
+        self.studio_check_button = QPushButton("Cek Izin LIVE Studio (tanpa RapidAPI)")
+        self.studio_check_button.clicked.connect(self.check_unsigned_studio)
+        layout.addWidget(self.studio_check_button)
+        self.studio_check_status = QLabel("Izin LIVE Studio belum diperiksa.")
+        self.studio_check_status.setWordWrap(True)
+        layout.addWidget(self.studio_check_status)
 
         self.api_label = QLabel("RapidAPI Signer Key")
         layout.addWidget(self.api_label)
@@ -134,6 +144,9 @@ class SimpleAndroidWindow(QWidget):
         layout.addWidget(QLabel("Sumber izin LIVE"))
         # Avoid QComboBox's separate popup surface on Qt Android; it can trap
         # input after selecting an item on certain Android 16 builds.
+        self.unsigned_radio = QRadioButton(
+            "LIVE Studio tanpa RapidAPI (eksperimental)"
+        )
         self.streamlabs_radio = QRadioButton("Streamlabs (opsional)")
         self.mobile_radio = QRadioButton("Android LIVE (memerlukan signer)")
         self.pc_radio = QRadioButton("PC LIVE Studio (memerlukan signer)")
@@ -142,11 +155,15 @@ class SimpleAndroidWindow(QWidget):
         self.mode_buttons.addButton(self.streamlabs_radio)
         self.mode_buttons.addButton(self.mobile_radio)
         self.mode_buttons.addButton(self.pc_radio)
-        self.pc_radio.setChecked(True)
+        self.mode_buttons.addButton(self.unsigned_radio)
+        self.unsigned_radio.setChecked(True)
+        layout.addWidget(self.unsigned_radio)
         layout.addWidget(self.pc_radio)
         layout.addWidget(self.mobile_radio)
         layout.addWidget(self.streamlabs_radio)
-        for button in (self.streamlabs_radio, self.mobile_radio, self.pc_radio):
+        for button in (
+            self.unsigned_radio, self.streamlabs_radio, self.mobile_radio, self.pc_radio
+        ):
             button.toggled.connect(self.update_mode_visibility)
 
         layout.addWidget(QLabel("Judul LIVE"))
@@ -182,6 +199,10 @@ class SimpleAndroidWindow(QWidget):
         self.end_button = QPushButton("Akhiri Room LIVE")
         self.end_button.clicked.connect(self.finish_live)
         layout.addWidget(self.end_button)
+        self.native_streaming_button = QPushButton("Encoder sudah mengirim video")
+        self.native_streaming_button.clicked.connect(self.mark_native_streaming)
+        self.native_streaming_button.hide()
+        layout.addWidget(self.native_streaming_button)
 
         self.warning = QLabel(
             "Mode Android/PC asli mengembalikan key yang mungkin memerlukan "
@@ -202,6 +223,9 @@ class SimpleAndroidWindow(QWidget):
         self.streamlabs_timer = QTimer(self)
         self.streamlabs_timer.setInterval(1000)
         self.streamlabs_timer.timeout.connect(self.poll_streamlabs_login)
+        self.native_heartbeat_timer = QTimer(self)
+        self.native_heartbeat_timer.setInterval(5000)
+        self.native_heartbeat_timer.timeout.connect(self.send_native_heartbeat)
 
         settings = load_settings()
         if settings.get("cookies_path"):
@@ -213,6 +237,8 @@ class SimpleAndroidWindow(QWidget):
         self.update_mode_visibility()
 
     def selected_mode(self):
+        if self.unsigned_radio.isChecked():
+            return "native_unsigned"
         if self.streamlabs_radio.isChecked():
             return "streamlabs"
         return "mobile" if self.mobile_radio.isChecked() else "pc"
@@ -224,10 +250,14 @@ class SimpleAndroidWindow(QWidget):
             widget.setVisible(streamlabs)
         self.streamlabs_copy_link_button.setVisible(streamlabs and bool(self.streamlabs_login))
         self.streamlabs_cancel_button.setVisible(streamlabs and bool(self.streamlabs_login))
+        unsigned = self.selected_mode() == "native_unsigned"
         for widget in (self.cookie_status, self.native_check_button,
-                       self.native_check_status, self.api_label, self.api_key,
-                       self.qr_button, self.import_button, self.paste_button):
+                       self.native_check_status, self.import_button, self.paste_button):
             widget.setVisible(not streamlabs)
+        for widget in (self.studio_check_button, self.studio_check_status):
+            widget.setVisible(unsigned)
+        for widget in (self.api_label, self.api_key, self.qr_button):
+            widget.setVisible(not streamlabs and not unsigned)
         if streamlabs:
             # Do not keep consuming RapidAPI quota after switching to Streamlabs.
             self.qr_timer.stop()
@@ -250,11 +280,13 @@ class SimpleAndroidWindow(QWidget):
             self.qr_help.show()
             self.cancel_qr_button.show()
         self.hint.setText(
-            "Login Streamlabs lewat browser, lalu ambil RTMP/key tanpa RapidAPI. "
-            "Akun perlu izin TikTok LIVE dari Streamlabs."
-            if streamlabs else
-            "Cek sesi login tanpa RapidAPI. Untuk membuat LIVE/RTMP native, "
-            "backend TikTok masih memerlukan signer valid."
+            "Mode eksperimen: memakai cookies TikTok dan LIVE Studio API "
+            "tanpa RapidAPI. Server bisa menolak request pada akun Indonesia."
+            if unsigned else (
+                "Streamlabs opsional, tidak memerlukan RapidAPI."
+                if streamlabs else
+                "Mode LIVE Studio asli ini masih membutuhkan signer RapidAPI."
+            )
         )
 
     def begin_streamlabs_login(self):
@@ -406,7 +438,8 @@ class SimpleAndroidWindow(QWidget):
 
     def busy(self, value):
         for button in (self.import_button, self.paste_button, self.qr_button,
-                       self.native_check_button, self.generate_button,
+                       self.native_check_button, self.studio_check_button,
+                       self.native_streaming_button, self.generate_button,
                        self.end_button, self.cancel_qr_button,
                        self.streamlabs_browser_button, self.streamlabs_paste_token_button,
                        self.streamlabs_cancel_button, self.streamlabs_copy_link_button):
@@ -541,13 +574,13 @@ class SimpleAndroidWindow(QWidget):
     def generate(self):
         mode = self.selected_mode()
         api_key = self.api_key.text().strip()
-        if mode != "streamlabs" and not api_key:
+        if mode not in ("streamlabs", "native_unsigned") and not api_key:
             self.status.setText(
                 "TikTok native belum dapat membuat RTMP/Stream Key tanpa signer. "
                 "Cek Sesi TikTok bisa digunakan tanpa RapidAPI."
             )
             return
-        if mode != "streamlabs" and not self.prepare_native_backend():
+        if mode not in ("streamlabs", "native_unsigned") and not self.prepare_native_backend():
             return
         self.clear_credentials()
         title = self.title.text()
@@ -570,14 +603,15 @@ class SimpleAndroidWindow(QWidget):
     def finish_live(self):
         api_key = self.api_key.text().strip()
         mode = self.last_mode or self.selected_mode()
-        if mode != "streamlabs" and not api_key:
+        if mode not in ("streamlabs", "native_unsigned") and not api_key:
             self.status.setText(
                 "Tidak dapat mengakhiri room TikTok native tanpa signer. "
                 "Akhiri LIVE dari aplikasi TikTok bila masih aktif."
             )
             return
-        if mode != "streamlabs" and not self.prepare_native_backend():
+        if mode not in ("streamlabs", "native_unsigned") and not self.prepare_native_backend():
             return
+        self.native_heartbeat_timer.stop()
         self.request(lambda: end_live(api_key, mode),
                      self.live_ended, "Mengakhiri room LIVE…")
 
