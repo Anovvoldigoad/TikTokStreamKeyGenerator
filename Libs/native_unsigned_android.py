@@ -92,8 +92,6 @@ class UnsignedStudioClient:
             "browser_language": "en", "browser_platform": "MacIntel",
             "browser_name": "Mozilla",
         }
-        if region:
-            self.params["priority_region"] = region
         self.headers = {
             "User-Agent": USER_AGENT,
             "Accept": "application/json, text/plain, */*",
