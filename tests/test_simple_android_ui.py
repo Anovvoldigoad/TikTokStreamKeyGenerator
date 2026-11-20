@@ -21,6 +21,12 @@ class SimpleAndroidUiTests(unittest.TestCase):
 
     def test_mode_switch_has_no_native_popup_and_does_not_block_buttons(self):
         self.assertEqual(self.window.findChildren(QComboBox), [])
+        self.assertEqual(self.window.selected_mode(), "native_unsigned")
+        self.assertTrue(self.window.unsigned_radio.isChecked())
+        self.assertTrue(self.window.api_key.isHidden())
+        self.assertFalse(self.window.studio_check_button.isHidden())
+        self.assertFalse(self.window.native_check_button.isHidden())
+        self.window.pc_radio.click()
         self.assertEqual(self.window.selected_mode(), "pc")
         self.assertTrue(self.window.pc_radio.isChecked())
         self.assertTrue(self.window.streamlabs_browser_button.isHidden())
@@ -42,6 +48,7 @@ class SimpleAndroidUiTests(unittest.TestCase):
         self.assertTrue(self.window.paste_button.isEnabled())
 
     def test_native_without_signer_never_loads_desktop_backend(self):
+        self.window.pc_radio.click()
         self.assertEqual(self.window.selected_mode(), "pc")
         with patch.object(self.window, "prepare_native_backend") as backend, \
              patch.object(self.window, "request") as request:
@@ -53,7 +60,7 @@ class SimpleAndroidUiTests(unittest.TestCase):
         self.assertIn("signer", self.window.status.text())
 
     def test_native_session_check_uses_no_rapidapi_or_streamlabs(self):
-        self.assertEqual(self.window.selected_mode(), "pc")
+        self.assertEqual(self.window.selected_mode(), "native_unsigned")
         with patch("simple_android.check_native_login_session",
                    return_value={"state": "valid", "username": "mock_user"}) as check, \
              patch.object(self.window, "request") as request:
@@ -66,6 +73,53 @@ class SimpleAndroidUiTests(unittest.TestCase):
         self.assertIn("BELUM", self.window.status.text())
         self.window.show_native_login_result({"state": "expired", "username": ""})
         self.assertIn("kedaluwarsa", self.window.native_check_status.text())
+
+    def test_unsigned_studio_preflight_and_generate_without_api_key(self):
+        self.assertEqual(self.window.selected_mode(), "native_unsigned")
+        with patch.object(self.window, "request") as request:
+            self.window.studio_check_button.click()
+            action, callback = request.call_args.args[:2]
+        with patch("simple_android.check_native_studio", return_value={
+            "allowed": True, "host": "webcast.tiktokv.com", "status_code": 0
+        }) as check:
+            response = action()
+        check.assert_called_once_with()
+        callback(response)
+        self.assertIn("diterima", self.window.studio_check_status.text())
+
+        with patch.object(self.window, "prepare_native_backend") as backend, \
+             patch.object(self.window, "request") as request:
+            self.window.generate()
+            action, callback = request.call_args.args[:2]
+        backend.assert_not_called()
+        with patch("simple_android.get_credentials", return_value={
+            "server": "rtmps://example.invalid/", "key": "private",
+            "room_id": "r1", "mode": "native_unsigned", "resumed": False,
+        }) as fake:
+            payload = action()
+        fake.assert_called_once_with("TikTok LIVE", "", "native_unsigned")
+        callback(payload)
+        self.assertTrue(self.window.native_heartbeat_timer.isActive())
+        self.assertTrue(self.window.native_room_active)
+        with patch.object(self.window, "request") as request:
+            self.window.send_native_heartbeat()
+            ping, _ = request.call_args.args[:2]
+        with patch("simple_android.heartbeat_native_studio", return_value=True) as fake:
+            self.assertTrue(ping())
+        fake.assert_called_once()
+
+        self.window.close()
+        self.assertTrue(self.window.native_room_active)
+        self.assertIn("Akhiri Room", self.window.status.text())
+        with patch.object(self.window, "request") as request:
+            self.window.finish_live()
+            end = request.call_args.args[0]
+        with patch("simple_android.end_live", return_value=True) as fake:
+            self.assertTrue(end())
+        fake.assert_called_once_with("", "native_unsigned")
+        self.window.live_ended(True)
+        self.assertFalse(self.window.native_heartbeat_timer.isActive())
+        self.assertFalse(self.window.native_room_active)
 
     def test_generate_captures_correct_mode(self):
         self.window.api_key.setText("api-key")
