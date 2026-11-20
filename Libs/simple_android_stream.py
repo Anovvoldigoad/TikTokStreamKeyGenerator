@@ -249,6 +249,9 @@ def get_credentials(title, api_key, mode="pc"):
         raise ValueError("Judul LIVE maksimal 32 karakter.")
     if mode == "streamlabs":
         return streamlabs_credentials(title)
+    if mode == "native_unsigned":
+        from Libs.native_unsigned_android import start_native_studio
+        return start_native_studio(title)
     settings, cookies_path = _ready_settings(api_key)
     profile = _device_profile(settings, mode)
 
@@ -292,6 +295,9 @@ def get_credentials(title, api_key, mode="pc"):
 def end_live(api_key, mode="pc"):
     if mode == "streamlabs":
         return end_streamlabs_live()
+    if mode == "native_unsigned":
+        from Libs.native_unsigned_android import end_native_studio
+        return end_native_studio()
     settings, cookies_path = _ready_settings(api_key)
     profile = _device_profile(settings, mode)
     from TiktokStreamKeyGenerator import Stream
