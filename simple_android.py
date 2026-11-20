@@ -289,6 +289,59 @@ class SimpleAndroidWindow(QWidget):
             )
         )
 
+    def check_unsigned_studio(self):
+        if self.job is not None:
+            return
+        self.request(
+            check_native_studio, self.show_studio_preflight,
+            "Memeriksa izin LIVE Studio tanpa RapidAPI…",
+        )
+
+    def show_studio_preflight(self, result):
+        if result.get("allowed"):
+            self.studio_check_status.setText(
+                "Precheck TikTok diterima (" + str(result.get("host")) + ")."
+            )
+            self.status.setText(
+                "Precheck diterima. Ini belum menjamin server akan mengizinkan "
+                "pembuatan room atau menerima stream video."
+            )
+        else:
+            self.studio_check_status.setText(
+                "Precheck ditolak (status_code="
+                + str(result.get("status_code")) + ")."
+            )
+            self.status.setText("Akses LIVE Studio belum diterima pada jalur tanpa RapidAPI.")
+
+    def send_native_heartbeat(self):
+        if self.job is None and self.native_room_active:
+            self.request(
+                heartbeat_native_studio, self.native_heartbeat_sent,
+                "Menjaga room LIVE Studio tetap aktif…",
+                on_error=self.native_heartbeat_error,
+            )
+
+    def native_heartbeat_sent(self, ok):
+        if ok:
+            self.status.setText("Room LIVE Studio terhubung. Heartbeat diterima.")
+
+    def native_heartbeat_error(self, message):
+        self.status.setText(
+            "Heartbeat gagal: " + message + ". Segera akhiri LIVE jika tidak bisa dipulihkan."
+        )
+
+    def mark_native_streaming(self):
+        if not self.native_room_active:
+            return
+        try:
+            mark_native_studio_streaming()
+        except RuntimeError as exc:
+            self.status.setText(str(exc))
+            return
+        self.native_streaming_button.setEnabled(False)
+        self.status.setText("Encoder ditandai aktif. TikTok akan menerima heartbeat LIVE.")
+        self.send_native_heartbeat()
+
     def begin_streamlabs_login(self):
         if self.job is not None:
             return
@@ -573,6 +626,9 @@ class SimpleAndroidWindow(QWidget):
 
     def generate(self):
         mode = self.selected_mode()
+        if self.native_room_active and mode != "native_unsigned":
+            self.status.setText("Akhiri room LIVE Studio eksperimen sebelum pindah mode.")
+            return
         api_key = self.api_key.text().strip()
         if mode not in ("streamlabs", "native_unsigned") and not api_key:
             self.status.setText(
@@ -599,6 +655,16 @@ class SimpleAndroidWindow(QWidget):
             ("Room LIVE lama dipakai kembali." if payload["resumed"]
              else "Room LIVE dibuat.") + " Kredensial berhasil diterima."
         )
+        if payload["mode"] == "native_unsigned":
+            self.native_room_active = True
+            self.native_streaming_button.show()
+            self.native_streaming_button.setEnabled(True)
+            self.native_heartbeat_timer.start()
+            self.status.setText(
+                "TikTok mengembalikan RTMP/key tanpa RapidAPI. Jalankan encoder, "
+                "lalu tekan 'Encoder sudah mengirim video'. "
+                "Jangan tutup aplikasi sebelum mengakhiri room."
+            )
 
     def finish_live(self):
         api_key = self.api_key.text().strip()
@@ -612,10 +678,23 @@ class SimpleAndroidWindow(QWidget):
         if mode not in ("streamlabs", "native_unsigned") and not self.prepare_native_backend():
             return
         self.native_heartbeat_timer.stop()
-        self.request(lambda: end_live(api_key, mode),
-                     self.live_ended, "Mengakhiri room LIVE…")
+        self.request(
+            lambda: end_live(api_key, mode), self.live_ended,
+            "Mengakhiri room LIVE…",
+            on_error=self.native_end_error if mode == "native_unsigned"
+            else None,
+        )
+
+    def native_end_error(self, message):
+        if self.native_room_active:
+            self.native_heartbeat_timer.start()
+        self.show_request_error(message)
+
 
     def live_ended(self, ended):
+        self.native_heartbeat_timer.stop()
+        self.native_room_active = False
+        self.native_streaming_button.hide()
         self.clear_credentials()
         self.last_mode = None
         self.status.setText("Room LIVE diakhiri." if ended else "Tidak ada room LIVE aktif.")
@@ -634,6 +713,12 @@ class SimpleAndroidWindow(QWidget):
             self.status.setText("Berhasil disalin. Jangan bagikan stream key.")
 
     def closeEvent(self, event):
+        if self.native_room_active:
+            event.ignore()
+            self.status.setText(
+                "Akhiri Room LIVE sebelum keluar agar TikTok tidak meninggalkan room aktif."
+            )
+            return
         if self.job is not None:
             event.ignore()
             self.status.setText("Selesaikan permintaan sebelum menutup aplikasi.")
