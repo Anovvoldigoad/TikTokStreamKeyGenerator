@@ -158,8 +158,10 @@ class UnsignedStudioClient:
         code = result.get("status_code")
         data = result.get("data")
         data = data if isinstance(data, dict) else {}
+        has_active_room = str(data.get("live_status") or "") == "2"
         return {
-            "allowed": code == 0,
+            "allowed": code == 0 and not has_active_room,
+            "active_room": has_active_room,
             "status_code": code,
             "message": str(data.get("message") or result.get("message") or ""),
             "host": self.host.split("://", 1)[1],
@@ -169,6 +171,11 @@ class UnsignedStudioClient:
         if not title or len(title) > 32:
             raise ValueError("Judul LIVE harus berisi 1–32 karakter.")
         preflight = self.preflight()
+        if preflight["active_room"]:
+            raise RuntimeError(
+                "TikTok melaporkan room LIVE yang masih aktif. "
+                "Akhiri LIVE lama sebelum mencoba membuat yang baru."
+            )
         if not preflight["allowed"]:
             raise RuntimeError(
                 "TikTok menolak akses LIVE Studio tanpa RapidAPI "
