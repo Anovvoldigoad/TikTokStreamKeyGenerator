@@ -103,8 +103,16 @@ class UnsignedStudioClient:
         if not cookies.get("sessionid") and cookies.get("sessionid_ss"):
             cookies["sessionid"] = cookies["sessionid_ss"]
         idc = str(cookies.get("tt-target-idc") or cookies.get("store-idc") or "").lower()
-        self.host = HOST_BY_IDC.get(IDC_ALIASES.get(idc, idc), DEFAULT_HOST)
         region = str(cookies.get("store-country-code") or "").lower()
+        preferred = HOST_BY_IDC.get(IDC_ALIASES.get(idc, idc))
+        # Keep discovery narrow: region-appropriate TikTok hosts, then global.
+        # Do not send session cookies to unrelated third-party domains.
+        options = [preferred]
+        if region in ("id", "sg", "my") and preferred != HOST_BY_IDC["alisg"]:
+            options.append(HOST_BY_IDC["alisg"])
+        options.append(DEFAULT_HOST)
+        self.candidate_hosts = list(dict.fromkeys(host for host in options if host))
+        self.host = self.candidate_hosts[0]
         self.params = {
             "aid": 8311, "app_name": "tiktok_live_studio",
             "channel": "studio", "device_platform": "mac",
@@ -113,7 +121,8 @@ class UnsignedStudioClient:
             "webcast_language": "en", "device_id": "0", "install_id": "0",
             "timezone_name": "Asia/Jakarta",
             "browser_language": "en", "browser_platform": "MacIntel",
-            "browser_name": "Mozilla",
+            "browser_name": "Mozilla", "browser_version": USER_AGENT[8:],
+            **({"priority_region": region} if region else {}),
         }
         self.headers = {
             "User-Agent": USER_AGENT,
@@ -153,8 +162,25 @@ class UnsignedStudioClient:
         return payload
 
     def preflight(self):
-        result = self.request("GET", "/webcast/room/create_info/",
-                              query={"live_studio": "1"})
+        # A wrong regional data center often answers status_code=20003 even
+        # when the session is valid on the account's actual webcast host.
+        result = None
+        last_error = None
+        for host in self.candidate_hosts:
+            self.host = host
+            try:
+                candidate = self.request(
+                    "GET", "/webcast/room/create_info/",
+                    query={"live_studio": "1"}
+                )
+            except RuntimeError as exc:
+                last_error = exc
+                continue
+            result = candidate
+            if str(candidate.get("status_code")) != "20003":
+                break
+        if result is None:
+            raise last_error or RuntimeError("Tidak ada server TikTok yang menjawab.")
         code = result.get("status_code")
         data = result.get("data")
         data = data if isinstance(data, dict) else {}
