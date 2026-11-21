@@ -213,7 +213,8 @@ class AccountLoadingTests(unittest.TestCase):
             stream.s.cookies.update({'sessionid': 'fixture-only'})
             stream.save_cookies()
             original = Path(self.cookies).read_bytes()
-            self.assertEqual(json.loads(original)[0]['value'], 'fixture-only')
+            session = next(cookie for cookie in json.loads(original) if cookie['name'] == 'sessionid')
+            self.assertEqual(session['value'], 'fixture-only')
             stream.s.cookies.update({'sessionid': 'new-fixture'})
             with patch.object(gui.os, 'replace', side_effect=OSError('Fixture failure')):
                 with self.assertRaises(OSError):

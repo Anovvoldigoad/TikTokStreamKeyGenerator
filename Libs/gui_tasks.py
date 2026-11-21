@@ -65,6 +65,7 @@ class BusyDialog(AccentDialog):
     def __init__(self, owner, text):
         super().__init__(owner)
         self.setWindowTitle('Please wait')
+        self.setProperty('android_disable_close', True)
         self.setWindowModality(Qt.ApplicationModal)
         self.setWindowFlag(Qt.WindowCloseButtonHint, False)
         layout = QHBoxLayout(self)

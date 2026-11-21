@@ -1,0 +1,60 @@
+name: Android FFmpeg executable ABI audit
+
+on:
+  push:
+    branches: [port/android-qt-parity]
+    paths:
+      - '.github/workflows/android-ffmpeg-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-arm64-ffmpeg:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Retrieve pinned Android arm64 FFmpeg binary for audit
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --silent --show-error \
+            "https://raw.githubusercontent.com/hzw1199/Android-FFmpeg-Prebuilt/90231cc0105aef4f76926b911535f5eb73511b86/ffmpeg-9.0/bin/ffmpeg" \
+            --output android-ffmpeg-arm64
+          printf '%s  %s\n' "602b24c9e967863ff608a685eaaad10ea6711758" android-ffmpeg-arm64 > expected-git-blob.txt
+          test "$(git hash-object android-ffmpeg-arm64)" = "602b24c9e967863ff608a685eaaad10ea6711758"
+          file android-ffmpeg-arm64
+      - name: Check ARM64 ELF, executable linking, 16 KiB load alignment
+        run: |
+          set -euo pipefail
+          readelf -hW android-ffmpeg-arm64 | tee elf-header.txt
+          readelf -lW android-ffmpeg-arm64 | tee elf-program-headers.txt
+          readelf -dW android-ffmpeg-arm64 | tee elf-dynamic.txt
+          python - <<'PY'
+          import pathlib, re
+          header = pathlib.Path("elf-header.txt").read_text()
+          program = pathlib.Path("elf-program-headers.txt").read_text()
+          if not re.search(r"Machine:\s*AArch64", header):
+              raise SystemExit("Not an AArch64 ELF")
+          load_lines = [line for line in program.splitlines()
+                        if re.match(r"^\s*LOAD\s", line)]
+          if not load_lines:
+              raise SystemExit("ELF contains no LOAD segments")
+          alignments = [int(line.split()[-1], 16) for line in load_lines]
+          if min(alignments) < 0x4000:
+              raise SystemExit(f"ELF LOAD alignment below 16 KiB: {alignments}")
+          print("PASS: AArch64 and 16 KiB LOAD alignment", alignments)
+          print("Dynamic dependencies require review before APK packaging.")
+          PY
+          sha256sum android-ffmpeg-arm64 | tee ffmpeg-sha256.txt
+      - name: Archive ABI evidence (do not publish binary or APK)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ffmpeg-android-arm64-abi-audit
+          path: |
+            elf-header.txt
+            elf-program-headers.txt
+            elf-dynamic.txt
+            ffmpeg-sha256.txt
+          retention-days: 7

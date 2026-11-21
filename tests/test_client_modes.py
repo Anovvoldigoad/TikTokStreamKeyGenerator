@@ -29,7 +29,11 @@ class ModeTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = str(Path(self.temp.name) / 'config.json')
         self.cookies = str(Path(self.temp.name) / 'cookies.json')
-        Path(self.cookies).write_text('[]')
+        # Real Stream requires a nonempty cookie export; use a synthetic
+        # non-session cookie so auth-dependent region discovery stays offline.
+        Path(self.cookies).write_text(json.dumps([
+            {'name': 'offline_fixture', 'value': 'offline-only-fixture', 'domain': '.tiktok.com'}
+        ]))
         self.config = {'device_id': '111', 'install_id': '222', 'cookies_path': self.cookies,
                        'dual_layout_supported': True, 'custom_future_option': 'preserve', 'suppress_donation_reminder': True}
         Path(self.path).write_text(json.dumps(self.config))

@@ -11,7 +11,6 @@ if '--smoke-test' in sys.argv:
         faulthandler.enable(file=_release_smoke_log, all_threads=True)
         print('Starting packaged module imports', file=_release_smoke_log, flush=True)
 
-import truststore
 import hashlib
 import copy
 from collections import OrderedDict
@@ -71,7 +70,12 @@ from PySide6.QtWidgets import (
 if sys.platform == "win32":
     import winreg
 
-truststore.inject_into_ssl()
+# Android uses the platform trust chain. The desktop truststore injection is
+# not supported on every embedded Android Python runtime.
+from Libs.app_paths import is_android_runtime
+if not is_android_runtime():
+    import truststore
+    truststore.inject_into_ssl()
 
 from Libs.fluent_ui import (
     CheckBox as QCheckBox, ComboBox as QComboBox, EditableComboBox, LineEdit as QLineEdit,
@@ -250,6 +254,9 @@ def _is_macos_app_bundle():
 
 
 def _user_data_dir():
+    if is_android_runtime():
+        from Libs.app_paths import android_data_dir
+        return android_data_dir()
     # Config, the default cookies file, and logs live next to the
     # executable on Windows/Linux (portable style). macOS .app bundles use
     # the standard per-user Application Support folder instead.
@@ -535,11 +542,14 @@ class Stream:
         self.streamId = ""
         self._cached_live_studio_version = None
         self.cookies_path = _normalize_configured_path(cookies_path or _configured_cookies_path())
-        with open(self.cookies_path, "r", encoding="utf-8") as file:
+        with open(self.cookies_path, "r", encoding="utf-8-sig") as file:
             cookies_file = json.load(file)
 
+        # The GUI can import wrapped browser exports; request sessions must
+        # load the exact same normalized cookie objects (not dict keys).
+        from Libs.cookie_payload import normalize_cookie_entries
         cookies = {}
-        for cookie in cookies_file:
+        for cookie in normalize_cookie_entries(cookies_file):
             cookies[cookie["name"]] = cookie["value"]
         self.s.cookies.update(cookies)
         self._region_context_key = session_key(self.cookies_path, self.client.kind, self._cookie_value)
@@ -562,23 +572,11 @@ class Stream:
         )
         self.streamId = room.get("stream_id_str") or str(room.get("stream_id", ""))
         self.streamUrl = (room.get("stream_url") or {}).get("rtmp_push_url", "")
-        if self.streamUrl:
-            split_index = self.streamUrl.rfind("/")
-            self.baseStreamUrl = self.streamUrl[:split_index]
-            self.streamKey = self.streamUrl[split_index + 1 :]
-        else:
-            self.baseStreamUrl = ""
-            self.streamKey = ""
+        self.baseStreamUrl, self.streamKey = _split_rtmp_push_url(self.streamUrl)
 
         multi_stream_url = room.get("multi_stream_url") or {}
         self.multiStreamUrl = multi_stream_url.get("rtmp_push_url", "")
-        if self.multiStreamUrl:
-            split_index = self.multiStreamUrl.rfind("/")
-            self.multiBaseStreamUrl = self.multiStreamUrl[:split_index]
-            self.multiStreamKey = self.multiStreamUrl[split_index + 1 :]
-        else:
-            self.multiBaseStreamUrl = ""
-            self.multiStreamKey = ""
+        self.multiBaseStreamUrl, self.multiStreamKey = _split_rtmp_push_url(self.multiStreamUrl)
 
         self.multiStreamScene = room.get("multi_stream_scene")
         self.multiStreamId = (
@@ -597,7 +595,7 @@ class Stream:
             or str(owner.get("id") or "")
         )
         has_ids = bool(self.roomId and self.streamId)
-        has_push_url = bool(self.streamUrl)
+        has_push_url = bool(self.streamKey)
         return has_ids and (has_push_url or not require_stream_url)
 
     def save_cookies(self, path=None):
@@ -1230,7 +1228,7 @@ class Stream:
             if not isinstance(room, dict):
                 raise RuntimeError('Android dual creation returned no room.')
             ready = self._apply_room_info(room, require_stream_url=True)
-            if not (ready and distinct_push_urls(self.streamUrl, self.multiStreamUrl) and secondary_stream_id(room)):
+            if not (ready and self.multiStreamKey and distinct_push_urls(self.streamUrl, self.multiStreamUrl) and secondary_stream_id(room)):
                 message = 'TikTok did not allocate two distinct push URLs and a secondary stream ID for Android Dual Layout.'
                 if self.roomId and self.streamId and self.roomId != previous_room_id:
                     try:
@@ -1256,6 +1254,19 @@ class Stream:
             prompt = streamInfo.get("data", {}).get("prompts") or streamInfo.get("prompts")
             if not prompt:
                 prompt = "Failed to create stream: " + json.dumps(streamInfo, ensure_ascii=False)[:1000]
+            from Libs.live_start_safety import end_new_room_if_allocated
+            try:
+                ended = end_new_room_if_allocated(
+                    self, previous_room_id=previous_room_id,
+                    device_id=device_id, install_id=install_id,
+                    priority_region=priority_region,
+                )
+            except Exception as cleanup_error:
+                raise RuntimeError(
+                    str(prompt) + " A newly created room may still be LIVE: cleanup failed."
+                ) from cleanup_error
+            if ended:
+                prompt = str(prompt) + " The incomplete LIVE room was ended."
             raise RuntimeError(prompt) from exc
 
     def getCreateRoomInfo(self, device_id="", install_id="", priority_region="", last_time_hashtag_id="5"):
@@ -2423,11 +2434,16 @@ def _qrcode_png_base64(value):
         return ""
     try:
         import io
-        import qrcode
 
-        image = qrcode.make(value)
         buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
+        if is_android_runtime():
+            # segno's pure-Python PNG writer works in embedded Android Python;
+            # qrcode's default Pillow image factory has no Android wheel.
+            import segno
+            segno.make(value).save(buffer, kind="png", scale=6)
+        else:
+            import qrcode
+            qrcode.make(value).save(buffer, format="PNG")
         return base64.b64encode(buffer.getvalue()).decode("ascii")
     except Exception:
         return ""
@@ -2899,7 +2915,7 @@ def _app_executable_path():
 def _runtime_logs_dir():
     # macOS .app bundles keep logs with the other user data; the bundle
     # itself is not a durable, writable location.
-    base = _user_data_dir() if _is_macos_app_bundle() else _runtime_base_dir()
+    base = _user_data_dir() if (_is_macos_app_bundle() or is_android_runtime()) else _runtime_base_dir()
     preferred = os.path.join(base, "logs")
     try:
         os.makedirs(preferred, exist_ok=True)
@@ -2911,9 +2927,16 @@ def _runtime_logs_dir():
 
 
 def _bundled_ffmpeg_path():
+    if is_android_runtime():
+        from Libs.android_ffmpeg import find_ffmpeg
+        return find_ffmpeg()
     exe_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
     base_dir = _runtime_base_dir()
+    # An Android package may place an executable alongside native libraries.
+    # Never assume an FFmpeg executable exists just because Qt launched.
+    android_binary = os.environ.get("TIKTOK_ANDROID_FFMPEG", "") if is_android_runtime() else ""
     candidates = [
+        android_binary,
         os.path.join(base_dir, "bin", exe_name),
         os.path.join(base_dir, exe_name),
         os.path.join(os.getcwd(), "bin", exe_name),
@@ -2924,9 +2947,14 @@ def _bundled_ffmpeg_path():
         candidates.append(found_in_path)
 
     for candidate in candidates:
-        if candidate and os.path.exists(candidate):
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
 
+    if is_android_runtime():
+        raise FileNotFoundError(
+            "Android FFmpeg executable is not packaged or not executable. "
+            "LIVE cannot start safely until the signed SEI proxy is ported."
+        )
     raise FileNotFoundError(
         "FFmpeg was not found. Put ffmpeg in the app's bin folder or add it to PATH."
     )
@@ -2961,12 +2989,38 @@ def _safe_log_tail(path, max_lines=30):
         return ""
 
 
+def _split_rtmp_push_url(value):
+    """Split complete TikTok push credentials without treating an app path as a key."""
+    if not isinstance(value, str) or not value:
+        return "", ""
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        if parsed.scheme.lower() not in ("rtmp", "rtmps") or not parsed.hostname:
+            return "", ""
+    except ValueError:
+        return "", ""
+
+    app_path, separator, stream_key = parsed.path.rpartition("/")
+    if not separator or not app_path.strip("/") or not stream_key:
+        return "", ""
+    base = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, app_path, "", ""))
+    if parsed.query:
+        stream_key += "?" + parsed.query
+    return base, stream_key
+
+
 def _mask_stream_url(value):
-    if not value.startswith("rtmp://"):
+    """Never write remote RTMP(S) push credentials into proxy logs."""
+    if not value.lower().startswith(("rtmp://", "rtmps://")):
         return value
-    if "?" not in value:
-        return value
-    return value.split("?", 1)[0] + "?..."
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        if (parsed.hostname in ("127.0.0.1", "::1", "localhost")
+                and not (parsed.username or parsed.password or parsed.query or parsed.fragment)):
+            return value
+        return f"{parsed.scheme}://[stream-endpoint-redacted]"
+    except ValueError:
+        return "[stream-endpoint-redacted]"
 
 
 # ----------------------------------------------------------------------
@@ -3250,7 +3304,7 @@ class StreamKeyGeneratorWindow(AccentWindow):
         configure_fluent_theme()
         self.setWindowTitle("TikTok Stream Key Generator")
         self.setWindowIcon(_application_icon())
-        self.setMinimumSize(900, 580)
+        self.setMinimumSize(320, 480) if is_android_runtime() else self.setMinimumSize(900, 580)
         self._workspace_restoring = True
         self.device_initialization_in_flight = False
         self.device_initialization_attempted = False
@@ -3263,6 +3317,8 @@ class StreamKeyGeneratorWindow(AccentWindow):
         self._proxy_cleanup_threads = []
         self.device_id = ""
         self.install_id = ""
+        # Android packaging is not the TikTok *mobile API* identity. Default
+        # to the desktop-equivalent PC signing path; saved user mode still wins.
         self.device_type = 'pc'
         self.devices = {'pc': {}, 'mobile': {'device_id': '', 'install_id': ''}}
         self._config_extra = {}
@@ -3371,8 +3427,12 @@ class StreamKeyGeneratorWindow(AccentWindow):
         if has_startup_cookies:
             self.schedule_account_refresh(900)
         single_shot(self, 0, self.load_game_tags)
-        single_shot(self, 3000, self.show_donation_reminder)
-        single_shot(self, 6000, self.check_updates_on_startup)
+        if not is_android_runtime():
+            # The Android 16 crash dump entered QDialog::exec() from a startup
+            # timer and aborted in Qt's OpenGL backing-store initialization.
+            # Do not open unsolicited modal windows during mobile startup.
+            single_shot(self, 3000, self.show_donation_reminder)
+            single_shot(self, 6000, self.check_updates_on_startup)
 
 
     def _build_ui(self):
@@ -4196,7 +4256,9 @@ class StreamKeyGeneratorWindow(AccentWindow):
         self.settings_dialog = QDialog(self)
         self.settings_dialog.setWindowTitle('Settings')
         self.settings_dialog.resize(760, 570)
-        self.settings_dialog.setMinimumWidth(640)
+        # The desktop minimum is wider than a typical Android activity.
+        # The embedded settings sheet must be free to fit its viewport.
+        self.settings_dialog.setMinimumWidth(0 if is_android_runtime() else 640)
         layout = QVBoxLayout(self.settings_dialog)
         layout.setContentsMargins(20, 16, 20, 16)
         navigation = Pivot(self.settings_dialog)
@@ -4570,14 +4632,39 @@ class StreamKeyGeneratorWindow(AccentWindow):
         self.game_label.setVisible(is_gaming)
         self.game_combo.setVisible(is_gaming)
 
+    def _choose_file(self, title, directory, filter_text):
+        # Android's document picker switches into a native activity. Detach
+        # the embedded settings sheet before opening it so Qt does not leave
+        # an active modal widget surface across the activity transition.
+        settings = getattr(self, "settings_dialog", None)
+        restore_settings = (is_android_runtime() and settings is not None
+                            and settings.isVisible())
+        if restore_settings:
+            settings.hide()
+        try:
+            return QFileDialog.getOpenFileName(self, title, directory, filter_text)
+        finally:
+            if restore_settings and not getattr(self, "_closing", False):
+                settings.show()
+
     def browse_image(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select an Image",
-            "",
-            "Images (*.png *.jpg *.jpeg);;All files (*.*)",
-        )
+        try:
+            file_path, _ = self._choose_file(
+                "Select an Image",
+                "",
+                "Images (*.png *.jpg *.jpeg);;All files (*.*)",
+            )
+        except (OSError, RuntimeError) as exc:
+            self.show_error(f"Could not open image picker: {exc}")
+            return
         if file_path:
+            try:
+                if is_android_runtime():
+                    from Libs.android_file_import import import_selected_file
+                    file_path = import_selected_file(file_path, "thumbnail")
+            except (OSError, ValueError, RuntimeError) as exc:
+                self.show_error(f"Could not import thumbnail: {exc}")
+                return
             self.thumbnail_edit.setText(file_path)
 
     def copy_to_clipboard(self, content, button=None):
@@ -5282,10 +5369,12 @@ class StreamKeyGeneratorWindow(AccentWindow):
         if selected in games:
             self.game_combo.setCurrentText(games[selected])
         self.game_combo.setPlaceholderText('Select a game' if games else 'Games unavailable; reopen the app to retry')
-        completer = QCompleter(list(games.values()), self)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        completer.setFilterMode(Qt.MatchContains)
-        self.game_combo.setCompleter(completer)
+        if not is_android_runtime():
+            # Fluent's completer opens a separate Qt popup surface on Android.
+            completer = QCompleter(list(games.values()), self)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchContains)
+            self.game_combo.setCompleter(completer)
         self.sync_activity_spinner()
 
     def open_campaigns(self):
@@ -5497,53 +5586,8 @@ class StreamKeyGeneratorWindow(AccentWindow):
         QMessageBox.information(self, 'Device setup details', details)
 
     def normalize_cookie_payload(self, payload):
-        if isinstance(payload, dict):
-            if isinstance(payload.get("cookies"), list):
-                payload = payload["cookies"]
-            elif isinstance(payload.get("Cookie"), list):
-                payload = payload["Cookie"]
-            elif "name" in payload and "value" in payload:
-                payload = [payload]
-            else:
-                raise RuntimeError("JSON file does not look like a cookies export.")
-
-        if not isinstance(payload, list):
-            raise RuntimeError("Cookies JSON must be a list of cookie objects.")
-
-        cookies = []
-        for index, cookie in enumerate(payload, 1):
-            if not isinstance(cookie, dict):
-                raise RuntimeError(f"Cookie entry #{index} is not an object.")
-
-            name = cookie.get("name")
-            value = cookie.get("value")
-            if name in (None, "") or value is None:
-                continue
-
-            entry = dict(cookie)
-            entry["name"] = str(name)
-            entry["value"] = str(value)
-
-            if "expires" not in entry:
-                for key in ("expirationDate", "expiry", "expiration_date"):
-                    if key in entry:
-                        try:
-                            entry["expires"] = int(float(entry[key]))
-                        except (TypeError, ValueError):
-                            pass
-                        break
-
-            if "httpOnly" not in entry and "http_only" in entry:
-                entry["httpOnly"] = bool(entry.get("http_only"))
-            if "sameSite" not in entry and "same_site" in entry:
-                entry["sameSite"] = entry.get("same_site")
-
-            cookies.append(entry)
-
-        if not cookies:
-            raise RuntimeError("No usable cookies with name/value fields were found.")
-
-        return cookies
+        from Libs.cookie_payload import normalize_cookie_entries
+        return normalize_cookie_entries(payload)
 
     def load_cookie_entries_from_file(self, path):
         with open(path, "r", encoding="utf-8-sig") as file:
@@ -5604,16 +5648,24 @@ class StreamKeyGeneratorWindow(AccentWindow):
         start_dir = os.path.dirname(self.get_cookies_path())
         if not os.path.isdir(start_dir):
             start_dir = ""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Cookies JSON",
-            start_dir,
-            "JSON files (*.json);;All files (*.*)",
-        )
+        try:
+            file_path, _ = self._choose_file(
+                "Select Cookies JSON",
+                start_dir,
+                "JSON files (*.json);;All files (*.*)",
+            )
+        except (OSError, RuntimeError) as exc:
+            self.show_error(f"Could not open cookies picker: {exc}")
+            return
         if not file_path:
             return
 
         try:
+            if is_android_runtime():
+                from Libs.android_file_import import import_selected_file
+                file_path = import_selected_file(
+                    file_path, "cookies", validator=self.load_cookie_entries_from_file
+                )
             self.load_cookie_entries_from_file(file_path)
         except Exception as exc:
             self.show_error(f"Invalid cookies JSON: {exc}")
@@ -5826,6 +5878,10 @@ class StreamKeyGeneratorWindow(AccentWindow):
             log_path,
         ]
 
+        if is_android_runtime():
+            # Android has no launchable child CPython executable. Run the same
+            # signed relay algorithm in a managed worker thread instead.
+            return ["--sei-proxy", *proxy_args]
         if _is_packaged_app():
             return [_app_executable_path(), "--sei-proxy", *proxy_args]
 
@@ -5885,13 +5941,24 @@ class StreamKeyGeneratorWindow(AccentWindow):
         rapidapi_key = self.get_rapidapi_key()
         if rapidapi_key:
             child_env["RAPIDAPI_KEY"] = rapidapi_key
-        setattr(self, process_attribute, (yield Work(subprocess.Popen, command,
-            cwd=_runtime_base_dir(),
-            stdin=subprocess.DEVNULL,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            creationflags=creationflags,
-            env=child_env, label='Preparing local FFmpeg proxy signatures…')))
+        if is_android_runtime():
+            if not command or command[0] != "--sei-proxy":
+                raise RuntimeError("Invalid Android signed proxy command.")
+            from Libs.android_proxy import AndroidProxyProcess
+            # Signer settings are read from Android-private config.json.
+            # Do not mutate os.environ for one thread while a second canvas
+            # signs frames concurrently.
+            setattr(self, process_attribute, (yield Work(
+                AndroidProxyProcess, command[1:],
+                label='Preparing local FFmpeg proxy signatures…')))
+        else:
+            setattr(self, process_attribute, (yield Work(subprocess.Popen, command,
+                cwd=_runtime_base_dir(),
+                stdin=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                creationflags=creationflags,
+                env=child_env, label='Preparing local FFmpeg proxy signatures…')))
 
         (yield Work(time.sleep, 0.35, label='Preparing local FFmpeg proxy signatures…'))
         process = getattr(self, process_attribute)
@@ -6096,7 +6163,11 @@ class StreamKeyGeneratorWindow(AccentWindow):
         if self.studio_import_button is not None:
             self.studio_import_button.setEnabled(not busy)
         self.mobile_broadcast_options.setEnabled(not busy)
-        self.login_button.setEnabled(self.device_type == "pc" and self.has_device_identifiers())
+        # On Android, Login also opens the cookies importer. A missing PC
+        # device registration must not make that offline import inaccessible.
+        # QR login itself still checks registered device IDs before starting.
+        self.login_button.setEnabled(self.device_type == "pc" and
+            (self.has_device_identifiers() or is_android_runtime()))
         if has_cookies is None:
             has_cookies = self.get_cookie_file_status()[0]
 
@@ -6667,6 +6738,11 @@ class StreamKeyGeneratorWindow(AccentWindow):
             with open(CONFIG_PATH, "r", encoding="utf-8") as file:
                 data = json.load(file)
         except FileNotFoundError:
+            self.device_type = 'pc'
+            self.device_type_combo.blockSignals(True)
+            self.device_type_combo.setCurrentIndex(0)
+            self.device_type_combo.blockSignals(False)
+            self.update_device_mode_controls()
             self.device_id = ""
             self.install_id = ""
             self.cookie_file_path = _normalize_configured_path(DEFAULT_COOKIES_PATH)
@@ -6815,7 +6891,10 @@ class StreamKeyGeneratorWindow(AccentWindow):
             QDesktopServices.openUrl(QUrl(update_info["url"]))
 
     def start_login(self):
-        if not self.ensure_device_identifiers(show_popup=True):
+        # Importing an existing cookie export does not require newly issued
+        # TikTok device IDs. Android users must be able to reach that tool
+        # even when device-registration endpoints are unavailable.
+        if not is_android_runtime() and not self.ensure_device_identifiers(show_popup=True):
             return
 
         dialog = LoginDialog(self)
@@ -7019,6 +7098,19 @@ class StreamKeyGeneratorWindow(AccentWindow):
 
         if not self.ensure_rapidapi_signer():
             return
+        # Guard before any TikTok room-creation API request. Creating a room
+        # without a working relay leaves a LIVE running but unusable.
+        if is_android_runtime():
+            try:
+                from Libs.android_ffmpeg import validate_ffmpeg_for_live
+                ffmpeg_path = _bundled_ffmpeg_path()
+                # This launches three native FFmpeg probes. Never run them on
+                # the Qt GUI thread; they can block for up to 45 seconds.
+                (yield Work(validate_ffmpeg_for_live, ffmpeg_path,
+                            label='Checking Android FFmpeg capabilities…'))
+            except (OSError, RuntimeError) as exc:
+                self.show_error(str(exc))
+                return
         self.save_config(show_message=False)
 
         stream_started = False
@@ -7152,6 +7244,9 @@ class StreamKeyGeneratorWindow(AccentWindow):
 
                 dual_layout_requested = self.dual_layout_checkbox.isChecked()
 
+                # Track ownership; a proxy failure must not end an unrelated
+                # previously existing LIVE returned by the continue endpoint.
+                room_before_create = str(stream.roomId or "")
                 created = (yield Work(stream.createStream, self.title_edit.text(),
                     topic_id,
                     game_id,
@@ -7187,11 +7282,35 @@ class StreamKeyGeneratorWindow(AccentWindow):
                     return
 
                 if created:
-                    (yield from self.apply_stream_outputs(
-                        stream,
-                        priority_region=selected_region,
-                        dual_layout=dual_layout_requested,
-                    ))
+                    try:
+                        (yield from self.apply_stream_outputs(
+                            stream,
+                            priority_region=selected_region,
+                            dual_layout=dual_layout_requested,
+                        ))
+                    except Exception as proxy_error:
+                        from Libs.live_start_safety import end_new_room_if_allocated
+                        try:
+                            ended = (yield Work(
+                                end_new_room_if_allocated, stream,
+                                previous_room_id=room_before_create,
+                                device_id=self.device_id,
+                                install_id=self.install_id,
+                                priority_region=selected_region,
+                                label='Closing unusable LIVE room…',
+                            ))
+                        except Exception as cleanup_error:
+                            raise RuntimeError(
+                                "Local streaming could not start and TikTok may still have "
+                                "an active LIVE room. End it from TikTok before retrying. "
+                                f"Proxy error: {proxy_error}; cleanup error: {cleanup_error}"
+                            ) from cleanup_error
+                        if ended:
+                            raise RuntimeError(
+                                f"Local streaming could not start; the newly created LIVE "
+                                f"room was ended safely. Proxy error: {proxy_error}"
+                            ) from proxy_error
+                        raise
                     stream_started = True
                     self.anchor_ping_status = ANCHOR_STATUS_PREPARE
                     self.set_stream_state(is_live=True, is_paused=False)
@@ -7463,7 +7582,10 @@ class LoginDialog(QDialog):
         self.qr_label.setMinimumSize(260, 260)
         layout.addWidget(self.qr_label)
 
-        self.status_label = QLabel("Scan with the TikTok app.")
+        self.status_label = QLabel(
+            "Scan with TikTok on another device or import your own cookies JSON."
+            if is_android_runtime() else "Scan with the TikTok app."
+        )
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
@@ -7479,12 +7601,22 @@ class LoginDialog(QDialog):
         self.refresh_button.clicked.connect(self.load_qr_code)
         button_row.addWidget(self.refresh_button)
 
-        browser_button = QPushButton("Login in Browser")
-        browser_button.clicked.connect(self.open_browser_login)
+        browser_button = QPushButton("Import Cookies" if is_android_runtime() else "Login in Browser")
+        browser_button.clicked.connect(
+            self.import_android_cookies if is_android_runtime() else self.open_browser_login
+        )
         button_row.addWidget(browser_button)
 
         layout.addLayout(button_row)
-        self.load_qr_code()
+        if self.parent_window.has_device_identifiers():
+            self.load_qr_code()
+        else:
+            self.qr_label.setText('Device IDs are not ready')
+            self.status_label.setText(
+                'Import your cookies JSON to sign in. QR login requires '
+                'registered PC device IDs.'
+            )
+            self.refresh_button.setEnabled(False)
 
     def closeEvent(self, event):
         self.cleanup()
@@ -7526,6 +7658,10 @@ class LoginDialog(QDialog):
 
     def load_qr_code(self):
         if self._qr_busy:
+            return
+        if not self.parent_window.has_device_identifiers():
+            self.qr_label.setText('Device IDs are not ready')
+            self.status_label.setText('Import your cookies JSON or finish PC device setup.')
             return
         self.cleanup()
         self._qr_cancel = threading.Event()
@@ -7617,6 +7753,17 @@ class LoginDialog(QDialog):
         else:
             self.status_label.setText(payload.get('message') or payload.get('status_msg') or str(payload))
 
+    def import_android_cookies(self):
+        # Android does not have Windows' live-studio-app:// registry handler.
+        # Reuse the verified content-URI-safe cookie importer instead.
+        if not is_android_runtime():
+            return
+        self.cleanup()
+        self.accept()
+        # The Android SAF file picker must open only after the embedded QR
+        # dialog has finished and detached from the activity surface.
+        single_shot(self.parent_window, 0, self.parent_window.browse_cookies_file)
+
     def open_browser_login(self):
         self.cleanup()
         self.accept()
@@ -7692,8 +7839,11 @@ def main():
     app = QApplication(sys.argv)
     app.setWindowIcon(_application_icon())
     window = StreamKeyGeneratorWindow()
-    window.resize(1040, 640)
-    window.show()
+    if is_android_runtime():
+        window.showMaximized()
+    else:
+        window.resize(1040, 640)
+        window.show()
     sys.exit(app.exec())
 
 

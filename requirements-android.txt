@@ -1,0 +1,14 @@
+# Pure-Python application dependencies for the PySide6 Android build.
+# PySide6 and Shiboken6 Android wheels are supplied to pyside6-android-deploy.
+# curl_cffi desktop binaries and Nuitka cannot be bundled into an Android APK.
+requests>=2.31.0
+websockets>=15,<17
+PySide6-Fluent-Widgets>=1.11.3,<2
+pytz>=2024.1
+pycryptodome>=3.20.0
+python-dotenv>=1.0.1
+packaging>=26.0
+tzdata
+
+# Pure-Python QR encoder for QR login; avoids Pillow on Android.
+segno>=1.6.6,<2

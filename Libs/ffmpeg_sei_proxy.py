@@ -565,7 +565,7 @@ def _unique_dump_path(path):
     return dump_path.with_name(f"{dump_path.stem}.{stamp}.{nonce}{dump_path.suffix or '.flv'}")
 
 
-def _relay_once(args, signer, log):
+def _relay_once(args, signer, log, on_process_start=None):
     listen_proc = None
     dump_file = None
     input_stream = sys.stdin.buffer
@@ -576,6 +576,8 @@ def _relay_once(args, signer, log):
             stderr=subprocess.PIPE,
             creationflags=_subprocess_creationflags(),
         )
+        if on_process_start is not None:
+            on_process_start(listen_proc)
         input_stream = listen_proc.stdout
 
     # The TikTok push process is created lazily, on first actual FLV data
@@ -593,6 +595,8 @@ def _relay_once(args, signer, log):
             stderr=subprocess.PIPE,
             creationflags=_subprocess_creationflags(),
         )
+        if on_process_start is not None:
+            on_process_start(push_proc)
         threading.Thread(target=pump_stderr, args=("push", push_proc, log), daemon=True).start()
         output_stream = push_proc.stdin
         if args.dump_output_flv:
@@ -623,7 +627,8 @@ def _relay_once(args, signer, log):
     return push_code or listen_code or 0
 
 
-def main():
+def parse_proxy_args(argv=None):
+    """Shared CLI parser for desktop subprocesses and Android in-process relay."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--ffmpeg", required=True)
     parser.add_argument("--input-flv", choices=("listen", "pipe"), default="listen")
@@ -641,11 +646,15 @@ def main():
     parser.add_argument("--log", default="")
     parser.add_argument("--error-report", default="")
     parser.add_argument("--dump-output-flv", default="")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.input_flv == "listen" and not args.listen_url:
         parser.error("--listen-url is required when --input-flv=listen")
+    return args
 
+
+def main():
+    args = parse_proxy_args()
     try:
         return _run_proxy(args)
     except Exception as exc:
@@ -653,7 +662,7 @@ def main():
         raise
 
 
-def _run_proxy(args):
+def _run_proxy(args, *, stop_event=None, on_process_start=None):
     width, height = args.resolution.lower().replace("*", "x").split("x", 1)
     args.width = int(width)
     args.height = int(height)
@@ -664,13 +673,13 @@ def _run_proxy(args):
     else:
         log = sys.stderr
     try:
-        return _run_proxy_with_log(args, log)
+        return _run_proxy_with_log(args, log, stop_event=stop_event, on_process_start=on_process_start)
     finally:
         if log is not sys.stderr:
             log.close()
 
 
-def _run_proxy_with_log(args, log):
+def _run_proxy_with_log(args, log, *, stop_event=None, on_process_start=None):
     profile = {}
     if args.device_type == 'mobile':
         from Libs.client_profiles import device_records, mobile_record_defaults, ClientImplementation
@@ -700,12 +709,15 @@ def _run_proxy_with_log(args, log):
         return _relay_once(args, signer, log)
 
     attempt = 0
-    while True:
+    while stop_event is None or not stop_event.is_set():
         attempt += 1
         log.write(f"[proxy] waiting for OBS/local RTMP connection attempt={attempt}\n")
         log.flush()
         try:
-            code = _relay_once(args, signer, log)
+            if on_process_start is None:
+                code = _relay_once(args, signer, log)
+            else:
+                code = _relay_once(args, signer, log, on_process_start=on_process_start)
             log.write(f"[proxy] local RTMP session ended code={code}; reopening listener\n")
             log.flush()
         except Exception as exc:
@@ -715,7 +727,12 @@ def _run_proxy_with_log(args, log):
             # reopen the listener so OBS can reconnect.
             log.write(f"[proxy] session error: {type(exc).__name__}: {exc}; reopening listener\n")
             log.flush()
-        time.sleep(1)
+        if stop_event is not None:
+            if stop_event.wait(1):
+                break
+        else:
+            time.sleep(1)
+    return 0
 
 
 if __name__ == "__main__":
