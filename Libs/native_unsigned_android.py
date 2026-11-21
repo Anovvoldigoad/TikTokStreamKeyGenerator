@@ -153,10 +153,21 @@ class UnsignedStudioClient:
             )
             response.raise_for_status()
             payload = response.json()
+        except requests.HTTPError as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            raise RuntimeError(
+                "TikTok menolak request LIVE Studio lewat HTTP "
+                + (str(status) if status is not None else "tidak diketahui")
+                + ". Jika 403, sesi atau proteksi server mungkin menolak klien ini."
+            ) from None
         except requests.RequestException as exc:
-            raise RuntimeError("Request LIVE Studio ditolak atau koneksi gagal.") from exc
+            raise RuntimeError("Koneksi ke server LIVE Studio gagal atau timeout.") from exc
         except ValueError as exc:
-            raise RuntimeError("LIVE Studio tidak mengembalikan JSON valid.") from exc
+            raise RuntimeError(
+                "LIVE Studio mengembalikan respons bukan JSON "
+                "(HTTP " + str(response.status_code) + "). "
+                "Kemungkinan login ulang, redirect, atau proteksi bot."
+            ) from exc
         if not isinstance(payload, dict):
             raise RuntimeError("Format respons LIVE Studio tidak dikenal.")
         return payload
@@ -203,10 +214,17 @@ class UnsignedStudioClient:
                 "Akhiri LIVE lama sebelum mencoba membuat yang baru."
             )
         if not preflight["allowed"]:
+            code = preflight["status_code"]
+            hint = (
+                "Sesi web belum diterima oleh server LIVE Studio."
+                if str(code) == "20003" else
+                "Akun belum diberikan izin LIVE Studio pada endpoint ini."
+                if str(code) == "20800" else
+                "Periksa izin akun atau respons server TikTok."
+            )
             raise RuntimeError(
-                "TikTok menolak akses LIVE Studio tanpa RapidAPI "
-                f"(status_code={preflight['status_code']}). "
-                "Tidak ada room yang dibuat."
+                f"Precheck LIVE Studio ditolak (status_code={code}, "
+                f"host={preflight['host']}). {hint} Tidak ada room yang dibuat."
             )
         result = self.request("POST", "/webcast/room/create/", form={
             "title": title, "live_studio": 1, "gen_replay": True,
@@ -218,8 +236,18 @@ class UnsignedStudioClient:
         })
         code = result.get("status_code")
         if code != 0:
+            hint = (
+                "Sesi tidak diakui oleh endpoint pembuatan room."
+                if str(code) == "20003" else
+                "Akun tidak memiliki izin membuat LIVE Studio."
+                if str(code) == "20800" else
+                "LIVE lain mungkin masih aktif."
+                if str(code) == "30005" else
+                "TikTok menolak pembuatan room."
+            )
             raise RuntimeError(
-                f"TikTok menolak membuat room tanpa RapidAPI (status_code={code})."
+                f"Room LIVE Studio ditolak (status_code={code}, "
+                f"host={self.host.split('://', 1)[1]}). {hint}"
             )
         data = result.get("data") or {}
         room_id = str(data.get("id_str") or data.get("id") or "")
@@ -233,9 +261,13 @@ class UnsignedStudioClient:
                     self.ping(ping_room_id, stream_id, 4)
                 except RuntimeError:
                     pass
+            flags = (
+                f"room_id={bool(room_id)}, stream_id={bool(stream_id)}, "
+                f"rtmp_push_url={bool(push)}"
+            )
             raise RuntimeError(
-                "Respons TikTok tidak lengkap (room/stream/RTMP). "
-                "Room diakhiri jika memungkinkan."
+                "TikTok tidak mengembalikan kredensial RTMP lengkap ("
+                + flags + "). Room telah dicoba diakhiri."
             )
         return {
             **push, "room_id": room_id, "ping_room_id": ping_room_id,
@@ -262,6 +294,52 @@ _streaming = False
 def check_native_studio():
     """Read-only: can try without triggering a new LIVE room."""
     return UnsignedStudioClient().preflight()
+
+
+def diagnose_native_studio():
+    """Read-only permission diagnostic; never creates a LIVE or discloses secrets."""
+    client = UnsignedStudioClient()
+    result = client.preflight()
+    result.update({
+        "studio_enabled": None,
+        "locale_restricted": None,
+        "permission_status": None,
+        "permission_code": None,
+        "access_code": None,
+        "unmet_requirements": None,
+    })
+    try:
+        permission = client.request("GET", "/webcast/room/live_podcast/")
+        result["permission_code"] = permission.get("status_code")
+        data = permission.get("data")
+        data = data if isinstance(data, dict) else {}
+        scenario = data.get("live_scenario")
+        scenario = scenario if isinstance(scenario, dict) else {}
+        if isinstance(scenario.get("enable_live_studio"), bool):
+            result["studio_enabled"] = scenario["enable_live_studio"]
+        if isinstance(data.get("golive_locale_restricted"), bool):
+            result["locale_restricted"] = data["golive_locale_restricted"]
+        if isinstance(data.get("live_studio_permission_status"), (int, str)):
+            result["permission_status"] = str(data["live_studio_permission_status"])[:32]
+    except RuntimeError:
+        pass  # An inconclusive permission endpoint is not automatically a denial.
+    try:
+        access = client.request("GET", "/webcast/eco/check_access/",
+                                query={"permission_type": 1})
+        result["access_code"] = access.get("status_code")
+        data = access.get("data")
+        data = data if isinstance(data, dict) else {}
+        requirements = []
+        for group in data.get("guidelines") or []:
+            if isinstance(group, dict):
+                for req in group.get("requirements") or []:
+                    if isinstance(req, dict):
+                        requirements.append(req.get("pass") is True)
+        if requirements:
+            result["unmet_requirements"] = sum(not x for x in requirements)
+    except RuntimeError:
+        pass
+    return result
 
 
 def start_native_studio(title):
