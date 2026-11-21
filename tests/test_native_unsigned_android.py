@@ -124,6 +124,89 @@ class NativeUnsignedTests(unittest.TestCase):
         self.assertEqual(request.call_count, 3)
         self.assertIsNone(native._active)
 
+    def test_active_live_precheck_refuses_second_room(self):
+        with patch.object(native.requests, "request", return_value=fake_response({
+            "status_code": 0, "data": {"live_status": 2}
+        })) as request:
+            with self.assertRaisesRegex(RuntimeError, "masih aktif"):
+                native.start_native_studio("Never create second LIVE")
+        request.assert_called_once()
+        self.assertEqual(request.call_args.args[0], "GET")
+        self.assertNotIn("native_unsigned_room", core.load_settings())
+
+    def test_restart_recovers_room_for_cleanup_without_persisting_stream_key(self):
+        created = {
+            "status_code": 0,
+            "data": {
+                "id_str": "room-a", "stream_id_str": "stream-b",
+                "living_room_attrs": {"room_id_str": "room-ping"},
+                "stream_url": {
+                    "rtmp_push_url": "rtmps://push.invalid/live/secret?signature=sensitive"
+                },
+            },
+        }
+        def respond(method, url, **_):
+            if url.endswith("/create_info/"):
+                return fake_response({"status_code": 0})
+            if url.endswith("/create/"):
+                return fake_response(created)
+            if url.endswith("/ping/anchor/"):
+                return fake_response({"status_code": 0})
+            raise AssertionError("unexpected request")
+        with patch.object(native.requests, "request", side_effect=respond):
+            output = native.start_native_studio("Test")
+        self.assertIn("signature=sensitive", output["key"])
+        stored = core.load_settings()["native_unsigned_room"]
+        self.assertEqual(stored["room_id"], "room-a")
+        self.assertNotIn("key", str(stored))
+        self.assertNotIn("sensitive", str(stored))
+        native._active = None  # Simulate process restart and lost RTMP key.
+        with patch.object(native.requests, "request") as request:
+            with self.assertRaisesRegex(RuntimeError, "Akhiri Room"):
+                native.start_native_studio("Do not duplicate")
+        request.assert_not_called()
+        with patch.object(native.requests, "request", return_value=fake_response({
+            "status_code": 0
+        })) as request:
+            self.assertTrue(native.end_native_studio())
+        self.assertIn("status=4", request.call_args.kwargs["data"])
+        self.assertNotIn("native_unsigned_room", core.load_settings())
+        self.assertIsNone(native._active)
+
+    def test_restored_room_host_must_be_known_before_sending_cookies(self):
+        core.save_settings({
+            **core.load_settings(),
+            "native_unsigned_room": {
+                "room_id": "one", "ping_room_id": "two",
+                "stream_id": "three", "host": "https://attacker.invalid"
+            }
+        })
+        with patch.object(native.requests, "request") as request:
+            with self.assertRaisesRegex(RuntimeError, "Host room"):
+                native.end_native_studio()
+        request.assert_not_called()
+        self.assertIn("native_unsigned_room", core.load_settings())
+
+    def test_failed_private_persistence_attempts_to_end_just_created_live(self):
+        def respond(method, url, **_):
+            if url.endswith("/create_info/"):
+                return fake_response({"status_code": 0})
+            if url.endswith("/create/"):
+                return fake_response({"status_code": 0, "data": {
+                    "id_str": "one", "stream_id_str": "two",
+                    "stream_url": {"rtmp_push_url": "rtmp://example.invalid/live/key"}
+                }})
+            if url.endswith("/ping/anchor/"):
+                return fake_response({"status_code": 0})
+            raise AssertionError(url)
+        with patch.object(native.requests, "request", side_effect=respond) as request, \
+             patch.object(native, "save_settings", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(RuntimeError, "menyimpan identitas"):
+                native.start_native_studio("Test")
+        self.assertEqual(request.call_count, 3)
+        self.assertIn("status=4", request.call_args.kwargs["data"])
+        self.assertIsNone(native._active)
+
     def test_unrecognized_region_uses_fixed_host_and_key_cannot_be_fake(self):
         native.HOST_BY_IDC.get("random-host")
         self.assertIsNone(native._parse_push_url({"stream_url": {
