@@ -101,10 +101,10 @@ class SimpleAndroidUiTests(unittest.TestCase):
         callback(payload)
         self.assertTrue(self.window.native_heartbeat_timer.isActive())
         self.assertTrue(self.window.native_room_active)
-        with patch.object(self.window, "request") as request:
+        with patch("simple_android.heartbeat_native_studio", return_value=True) as fake, \
+             patch.object(self.window, "request") as request:
             self.window.send_native_heartbeat()
             ping, _ = request.call_args.args[:2]
-        with patch("simple_android.heartbeat_native_studio", return_value=True) as fake:
             self.assertTrue(ping())
         fake.assert_called_once()
 
