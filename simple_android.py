@@ -234,6 +234,15 @@ class SimpleAndroidWindow(QWidget):
             self.api_key.setText(settings["rapidapi_key"])
         if settings.get("streamlabs_token"):
             self.streamlabs_status.setText("Token Streamlabs tersimpan privat.")
+        if settings.get("native_unsigned_room"):
+            # Only room IDs/host survive a restart; never invent old RTMP keys.
+            self.native_room_active = True
+            self.last_mode = "native_unsigned"
+            self.status.setText(
+                "Room LIVE Studio lama terdeteksi setelah aplikasi dibuka ulang. "
+                "Tekan 'Akhiri Room LIVE' sebelum membuat room baru. "
+                "RTMP/key lama tidak disimpan."
+            )
         self.update_mode_visibility()
 
     def selected_mode(self):
