@@ -51,6 +51,7 @@ class SimpleAndroidWindow(QWidget):
         self.key_value = ""
         self.last_mode = None
         self.native_room_active = False
+        self.pending_live_end = False
 
         outer = QVBoxLayout(self)
         scroll = QScrollArea(self)
@@ -513,6 +514,9 @@ class SimpleAndroidWindow(QWidget):
                        self.streamlabs_browser_button, self.streamlabs_paste_token_button,
                        self.streamlabs_cancel_button, self.streamlabs_copy_link_button):
             button.setEnabled(not value)
+        # End LIVE must remain actionable while a slow heartbeat is in flight.
+        if value and self.native_room_active and self.last_mode == "native_unsigned":
+            self.end_button.setEnabled(True)
         # Radio buttons remain interactive while requests run. The request
         # already captures the selected mode on the GUI thread.
 
@@ -541,6 +545,10 @@ class SimpleAndroidWindow(QWidget):
         if self.streamlabs_complete:
             self.streamlabs_complete = False
             self.cancel_streamlabs_login(clear_status=False)
+        if self.pending_live_end:
+            self.pending_live_end = False
+            if self.native_room_active:
+                self.finish_live()
 
     def prepare_native_backend(self):
         # Backend imports other Qt components, so never first-import in QThread.
@@ -683,6 +691,14 @@ class SimpleAndroidWindow(QWidget):
             )
 
     def finish_live(self):
+        if self.job is not None and self.native_room_active:
+            self.pending_live_end = True
+            self.native_heartbeat_timer.stop()
+            self.status.setText(
+                "Permintaan mengakhiri LIVE diterima. "
+                "Menyelesaikan heartbeat yang sedang berlangsung dahulu…"
+            )
+            return
         api_key = self.api_key.text().strip()
         mode = self.last_mode or self.selected_mode()
         if mode not in ("streamlabs", "native_unsigned") and not api_key:
@@ -709,6 +725,7 @@ class SimpleAndroidWindow(QWidget):
 
     def live_ended(self, ended):
         self.native_heartbeat_timer.stop()
+        self.pending_live_end = False
         self.native_room_active = False
         self.native_streaming_button.hide()
         self.clear_credentials()
