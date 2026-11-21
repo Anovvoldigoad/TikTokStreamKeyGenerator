@@ -76,7 +76,7 @@ class SimpleAndroidUiTests(unittest.TestCase):
 
     def test_unsigned_studio_preflight_and_generate_without_api_key(self):
         self.assertEqual(self.window.selected_mode(), "native_unsigned")
-        with patch("simple_android.check_native_studio", return_value={
+        with patch("simple_android.diagnose_native_studio", return_value={
             "allowed": True, "host": "webcast.tiktokv.com", "status_code": 0
         }) as check, \
              patch.object(self.window, "request") as request:
@@ -85,7 +85,7 @@ class SimpleAndroidUiTests(unittest.TestCase):
             response = action()
         check.assert_called_once_with()
         callback(response)
-        self.assertIn("diterima", self.window.studio_check_status.text())
+        self.assertIn("create_info=0", self.window.studio_check_status.text())
 
         with patch.object(self.window, "prepare_native_backend") as backend, \
              patch.object(self.window, "request") as request:
@@ -120,6 +120,19 @@ class SimpleAndroidUiTests(unittest.TestCase):
         self.window.live_ended(True)
         self.assertFalse(self.window.native_heartbeat_timer.isActive())
         self.assertFalse(self.window.native_room_active)
+
+    def test_diagnostic_reveals_permission_denial_not_false_success(self):
+        self.window.show_studio_preflight({
+            "allowed": True, "active_room": False,
+            "host": "webcast.tiktokv.com", "status_code": 0,
+            "studio_enabled": False, "locale_restricted": True,
+            "permission_code": 0, "access_code": 0,
+            "unmet_requirements": 2,
+        })
+        self.assertIn("izinStudio=TIDAK", self.window.studio_check_status.text())
+        self.assertIn("syaratBelumLulus=2", self.window.studio_check_status.text())
+        self.assertIn("belum diberikan", self.window.status.text())
+        self.assertNotIn("private", self.window.studio_check_status.text())
 
     def test_restarted_native_room_can_be_ended_without_revealing_old_key(self):
         with patch("simple_android.load_settings", return_value={
