@@ -55,6 +55,28 @@ class NativeUnsignedTests(unittest.TestCase):
         self.assertNotIn("x-rapidapi-key", opts["headers"])
         self.assertEqual(opts["timeout"], 20)
 
+    def test_indonesian_unknown_idc_tries_sg_then_global_without_signer(self):
+        core.save_settings({"cookies_path": core.load_settings()["cookies_path"]})
+        cookie_path = Path(core.load_settings()["cookies_path"])
+        cookies = json.loads(cookie_path.read_text())
+        for cookie in cookies:
+            if cookie["name"] == "tt-target-idc":
+                cookie["value"] = "unknown-indonesia-idc"
+        cookie_path.write_text(json.dumps(cookies))
+        seen_hosts = []
+        def respond(method, url, **opts):
+            seen_hosts.append(url)
+            self.assertNotIn("X-RapidAPI-Key", opts["headers"])
+            self.assertEqual(method, "GET")
+            return fake_response({"status_code": 20003 if len(seen_hosts) == 1 else 0})
+        with patch.object(native.requests, "request", side_effect=respond):
+            result = native.check_native_studio()
+        self.assertTrue(result["allowed"])
+        self.assertEqual(len(seen_hosts), 2)
+        self.assertIn("alisg.tiktokv.com", seen_hosts[0])
+        self.assertIn("webcast.tiktokv.com", seen_hosts[1])
+        self.assertEqual(result["host"], "webcast.tiktokv.com")
+
     def test_rejected_preflight_never_creates_room(self):
         with patch.object(native.requests, "request", return_value=fake_response({
             "status_code": 20800, "message": "no live auth"
