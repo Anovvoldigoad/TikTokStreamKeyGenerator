@@ -307,7 +307,14 @@ class SimpleAndroidWindow(QWidget):
         )
 
     def show_studio_preflight(self, result):
-        if result.get("allowed"):
+        if result.get("active_room"):
+            self.studio_check_status.setText(
+                "TikTok melaporkan room LIVE aktif. Jangan membuat room baru."
+            )
+            self.status.setText(
+                "Akhiri LIVE yang masih aktif di TikTok sebelum membuat LIVE baru."
+            )
+        elif result.get("allowed"):
             self.studio_check_status.setText(
                 "Precheck TikTok diterima (" + str(result.get("host")) + ")."
             )
