@@ -121,6 +121,48 @@ class SimpleAndroidUiTests(unittest.TestCase):
         self.assertFalse(self.window.native_heartbeat_timer.isActive())
         self.assertFalse(self.window.native_room_active)
 
+    def test_restarted_native_room_can_be_ended_without_revealing_old_key(self):
+        with patch("simple_android.load_settings", return_value={
+            "native_unsigned_room": {
+                "room_id": "r1", "ping_room_id": "p1",
+                "stream_id": "s1", "host": "https://webcast.tiktokv.com"
+            }
+        }):
+            recovered = SimpleAndroidWindow()
+        # Simulate a return to UI after an Android process restart.
+        try:
+            self.assertTrue(recovered.native_room_active)
+            self.assertEqual(recovered.last_mode, "native_unsigned")
+            self.assertEqual(recovered.key.text(), "")
+            self.assertFalse(recovered.native_heartbeat_timer.isActive())
+            self.assertIn("Akhiri Room LIVE", recovered.status.text())
+            with patch.object(recovered, "request") as request:
+                recovered.finish_live()
+            action = request.call_args.args[0]
+            with patch("simple_android.end_live", return_value=True) as end:
+                self.assertTrue(action())
+            end.assert_called_once_with("", "native_unsigned")
+        finally:
+            recovered.native_room_active = False
+            recovered.close()
+
+    def test_end_live_is_queued_during_in_flight_heartbeat(self):
+        self.window.native_room_active = True
+        self.window.last_mode = "native_unsigned"
+        self.window.native_heartbeat_timer.start()
+        self.window.job = object()  # Heartbeat still running.
+        self.window.busy(True)
+        self.assertTrue(self.window.end_button.isEnabled())
+        with patch.object(self.window, "request") as request:
+            self.window.finish_live()
+            self.assertTrue(self.window.pending_live_end)
+            self.assertFalse(self.window.native_heartbeat_timer.isActive())
+            request.assert_not_called()
+            self.window.job_finished()
+            request.assert_called_once()
+        self.assertFalse(self.window.pending_live_end)
+        self.window.native_room_active = False
+
     def test_generate_captures_correct_mode(self):
         self.window.api_key.setText("api-key")
         self.window.pc_radio.click()
