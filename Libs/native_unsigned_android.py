@@ -35,7 +35,7 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
-from Libs.simple_android_stream import load_settings, validate_cookies
+from Libs.simple_android_stream import load_settings, save_settings, validate_cookies
 
 HOST_BY_IDC = {
     "alisg": "https://webcast16-normal-c-alisg.tiktokv.com",
@@ -236,8 +236,28 @@ def start_native_studio(title):
     if _active is not None:
         return {k: _active[k] for k in
                 ("server", "key", "room_id", "mode")} | {"resumed": True}
+    settings = load_settings()
+    if settings.get("native_unsigned_room"):
+        raise RuntimeError(
+            "Ada room LIVE Studio dari sesi sebelumnya. "
+            "Akhiri Room LIVE dahulu sebelum membuat room baru."
+        )
     client = UnsignedStudioClient()
     result = client.create(title)
+    settings["native_unsigned_room"] = {
+        key: result[key] for key in ("room_id", "ping_room_id", "stream_id", "host")
+    }
+    try:
+        save_settings(settings)
+    except OSError:
+        try:
+            client.ping(result["ping_room_id"], result["stream_id"], 4)
+        except RuntimeError:
+            pass
+        raise RuntimeError(
+            "Tidak dapat menyimpan identitas room LIVE. "
+            "Room telah dicoba diakhiri; cek status LIVE di TikTok."
+        ) from None
     _active = result
     return {k: result[k] for k in
             ("server", "key", "room_id", "mode")} | {"resumed": False}
@@ -262,9 +282,17 @@ def mark_native_studio_streaming():
 
 def end_native_studio():
     global _active, _streaming
-    if _active is None:
+    settings = load_settings()
+    room = _active or settings.get("native_unsigned_room")
+    if not room:
         return False
-    UnsignedStudioClient().ping(_active["ping_room_id"], _active["stream_id"], 4)
+    if room.get("host") not in {*HOST_BY_IDC.values(), DEFAULT_HOST}:
+        raise RuntimeError("Host room LIVE lama tidak dikenali; tidak mengirim cookies.")
+    client = UnsignedStudioClient()
+    client.host = room["host"]
+    client.ping(room["ping_room_id"], room["stream_id"], 4)
+    settings.pop("native_unsigned_room", None)
+    save_settings(settings)
     _active = None
     _streaming = False
     return True
