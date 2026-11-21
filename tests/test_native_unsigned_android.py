@@ -77,11 +77,65 @@ class NativeUnsignedTests(unittest.TestCase):
         self.assertIn("webcast.tiktokv.com", seen_hosts[1])
         self.assertEqual(result["host"], "webcast.tiktokv.com")
 
+    def test_diagnostic_checks_entitlement_without_creating_room(self):
+        calls = []
+        def respond(method, url, **kwargs):
+            calls.append((method, url, kwargs))
+            if url.endswith("/create_info/"):
+                return fake_response({"status_code": 0, "data": {}})
+            if url.endswith("/live_podcast/"):
+                return fake_response({"status_code": 0, "data": {
+                    "live_scenario": {"enable_live_studio": False},
+                    "golive_locale_restricted": True,
+                    "live_studio_permission_status": 2,
+                }})
+            if url.endswith("/check_access/"):
+                return fake_response({"status_code": 0, "data": {
+                    "guidelines": [{
+                        "requirements": [{"pass": False}, {"pass": True}]
+                    }]
+                }})
+            raise AssertionError(url)
+        with patch.object(native.requests, "request", side_effect=respond):
+            out = native.diagnose_native_studio()
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(method == "GET" for method, _, _ in calls))
+        self.assertTrue(out["allowed"])
+        self.assertIs(out["studio_enabled"], False)
+        self.assertIs(out["locale_restricted"], True)
+        self.assertEqual(out["permission_status"], "2")
+        self.assertEqual(out["unmet_requirements"], 1)
+
+    def test_diagnostic_permission_unavailable_remains_unknown(self):
+        def respond(method, url, **kwargs):
+            if url.endswith("/create_info/"):
+                return fake_response({"status_code": 0, "data": {}})
+            raise native.requests.RequestException("blocked")
+        with patch.object(native.requests, "request", side_effect=respond):
+            out = native.diagnose_native_studio()
+        self.assertTrue(out["allowed"])
+        self.assertIsNone(out["studio_enabled"])
+        self.assertIsNone(out["permission_code"])
+        self.assertIsNone(out["unmet_requirements"])
+
+    def test_room_rejection_code_is_shown_without_secret_body(self):
+        def respond(method, url, **kwargs):
+            if url.endswith("/create_info/"):
+                return fake_response({"status_code": 0, "data": {}})
+            return fake_response({
+                "status_code": 20800,
+                "message": "SECRET SESSION TOKEN SHOULD NOT APPEAR",
+            })
+        with patch.object(native.requests, "request", side_effect=respond):
+            with self.assertRaisesRegex(RuntimeError, "status_code=20800") as ctx:
+                native.start_native_studio("Testing")
+        self.assertNotIn("SECRET", str(ctx.exception))
+
     def test_rejected_preflight_never_creates_room(self):
         with patch.object(native.requests, "request", return_value=fake_response({
             "status_code": 20800, "message": "no live auth"
         })) as req:
-            with self.assertRaisesRegex(RuntimeError, "Tidak ada room"):
+            with self.assertRaisesRegex(RuntimeError, "status_code=20800"): 
                 core.get_credentials("Testing", "", "native_unsigned")
         req.assert_called_once()
         self.assertEqual(req.call_args.args[0], "GET")
@@ -141,7 +195,7 @@ class NativeUnsignedTests(unittest.TestCase):
                 return fake_response({"status_code": 0})
             raise AssertionError(url)
         with patch.object(native.requests, "request", side_effect=respond) as request:
-            with self.assertRaisesRegex(RuntimeError, "tidak lengkap"):
+            with self.assertRaisesRegex(RuntimeError, "RTMP lengkap"): 
                 native.start_native_studio("test")
         self.assertEqual(request.call_count, 3)
         self.assertIsNone(native._active)
