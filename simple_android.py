@@ -16,7 +16,7 @@ from Libs.simple_android_stream import (
 )
 from Libs.streamlabs_android import StreamlabsBrowserLogin
 from Libs.native_unsigned_android import (
-    check_native_studio, heartbeat_native_studio, mark_native_studio_streaming,
+    diagnose_native_studio, heartbeat_native_studio, mark_native_studio_streaming,
 )
 
 
@@ -103,7 +103,7 @@ class SimpleAndroidWindow(QWidget):
         self.native_check_status = QLabel("Sesi akun TikTok belum diperiksa.")
         self.native_check_status.setWordWrap(True)
         layout.addWidget(self.native_check_status)
-        self.studio_check_button = QPushButton("Cek Izin LIVE Studio (tanpa RapidAPI)")
+        self.studio_check_button = QPushButton("Diagnosa Izin LIVE Studio (tanpa RapidAPI)")
         self.studio_check_button.clicked.connect(self.check_unsigned_studio)
         layout.addWidget(self.studio_check_button)
         self.studio_check_status = QLabel("Izin LIVE Studio belum diperiksa.")
@@ -303,32 +303,59 @@ class SimpleAndroidWindow(QWidget):
         if self.job is not None:
             return
         self.request(
-            check_native_studio, self.show_studio_preflight,
+            diagnose_native_studio, self.show_studio_preflight,
             "Memeriksa izin LIVE Studio tanpa RapidAPI…",
         )
 
     def show_studio_preflight(self, result):
+        code = result.get("status_code")
+        permission = result.get("studio_enabled")
+        locale = result.get("locale_restricted")
+        requirements = result.get("unmet_requirements")
+        detail = (
+            "Server: " + str(result.get("host")) +
+            " | create_info=" + str(code) +
+            " | izinStudio=" + (
+                "YA" if permission is True else
+                "TIDAK" if permission is False else "BELUM DIKETAHUI"
+            ) +
+            " | batasWilayah=" + (
+                "YA" if locale is True else
+                "TIDAK" if locale is False else "BELUM DIKETAHUI"
+            ) +
+            " | permissionAPI=" + str(result.get("permission_code")) +
+            " | accessAPI=" + str(result.get("access_code")) +
+            " | syaratBelumLulus=" + str(requirements)
+        )
+        self.studio_check_status.setText(detail)
         if result.get("active_room"):
-            self.studio_check_status.setText(
-                "TikTok melaporkan room LIVE aktif. Jangan membuat room baru."
-            )
             self.status.setText(
-                "Akhiri LIVE yang masih aktif di TikTok sebelum membuat LIVE baru."
+                "TikTok melaporkan LIVE aktif; jangan membuat room baru."
+            )
+        elif permission is False or locale is True:
+            self.status.setText(
+                "TikTok mengindikasikan izin LIVE Studio belum diberikan atau "
+                "terbatas wilayah. LIVE dari HP tidak otomatis memberi izin Studio."
+            )
+        elif str(code) == "20003":
+            self.status.setText(
+                "Sesi tidak dikenali server LIVE Studio, meskipun bisa login web. "
+                "Cek akun, domain cookies dan server regional."
+            )
+        elif str(code) == "20800":
+            self.status.setText(
+                "TikTok menolak izin LIVE Studio (20800). Tidak dapat dipaksakan "
+                "dengan menghapus RapidAPI."
             )
         elif result.get("allowed"):
-            self.studio_check_status.setText(
-                "Precheck TikTok diterima (" + str(result.get("host")) + ")."
-            )
             self.status.setText(
-                "Precheck diterima. Ini belum menjamin server akan mengizinkan "
-                "pembuatan room atau menerima stream video."
+                "Precheck berhasil. Tekan Ambil RTMP & Stream Key untuk menguji "
+                "izin pembuatan room; hasilnya belum dijamin."
             )
         else:
-            self.studio_check_status.setText(
-                "Precheck ditolak (status_code="
-                + str(result.get("status_code")) + ")."
+            self.status.setText(
+                "Precheck belum diterima TikTok. Periksa kode di hasil diagnosis."
             )
-            self.status.setText("Akses LIVE Studio belum diterima pada jalur tanpa RapidAPI.")
 
     def send_native_heartbeat(self):
         if self.job is None and self.native_room_active:
